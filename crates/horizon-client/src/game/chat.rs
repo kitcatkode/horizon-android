@@ -139,6 +139,10 @@ fn should_discard_draft(reason: ChatExit, save_chat_drafts: bool) -> bool {
 /// `native_ime::viewport_bottom()`) to the GUI height the chat may use, never
 /// exceeding the full height. A zero bottom (no bounds read yet) leaves the
 /// height unchanged, so chat never collapses.
+/// How much higher than usual the chat history's bottom is given on the second screen's panel:
+/// right over the input, without the hotbar's room between (40 up, the input 14).
+pub(super) const CHAT_LIFT: f32 = 40.0 - 15.0;
+
 fn clamp_gui_height(full_height: f32, visible_bottom: u32, gui_scale: f32) -> f32 {
     if visible_bottom == 0 || gui_scale <= 0.0 {
         return full_height;
@@ -615,7 +619,12 @@ impl Game<'_> {
             b.height as i32,
             self.chat_abilities(),
         );
-        screen.auto_suggestions = self.settings.auto_suggestions;
+        // On the second screen's panel the completions are buttons to tap instead.
+        #[cfg(target_os = "android")]
+        let panel = self.hud_on_second_screen();
+        #[cfg(not(target_os = "android"))]
+        let panel = false;
+        screen.auto_suggestions = self.settings.auto_suggestions && !panel;
         self.ui.chat_screen = Some(screen);
         self.ui.chat_opened = Some(std::time::Instant::now());
         self.screen = Screen::Chat;
@@ -864,6 +873,28 @@ impl Game<'_> {
             screen.server_suggestions(&m, &c, id, range, list);
         }
     }
+    /// The open chat's completions at the cursor, in its list's order.
+    #[cfg(target_os = "android")]
+    pub(super) fn chat_completions(&self) -> Vec<String> {
+        self.ui
+            .chat_screen
+            .as_ref()
+            .map(ChatScreen::completions)
+            .unwrap_or_default()
+    }
+    /// Fill in the open chat's completion `index` (a tap on it).
+    #[cfg(target_os = "android")]
+    pub(super) fn chat_complete(&mut self, index: usize) -> bool {
+        let m = Measure(&self.gui.atlas.font);
+        let c = Commands {
+            dispatcher: chat_tree(&self.remote, &self.mods),
+            registries: &self.ui.registries,
+        };
+        self.ui
+            .chat_screen
+            .as_mut()
+            .is_some_and(|screen| screen.complete(&m, &c, index))
+    }
     /// Text typed into the chat box (control socket `chat`).
     pub(super) fn chat_type(&mut self, text: &str) {
         let m = Measure(&self.gui.atlas.font);
@@ -946,6 +977,10 @@ impl Game<'_> {
         let height = self.renderer.as_ref().map_or(720.0, |r| {
             HudBatch::new([r.config.width, r.config.height]).height
         });
+        // On the second screen's panel the chat has its own box, the history lifted to the input.
+        let height = self
+            .hosted_chat_box()
+            .map_or(height, |[_, h]| h + CHAT_LIFT);
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
             dispatcher: chat_tree(&self.remote, &self.mods),
@@ -1124,9 +1159,29 @@ impl Game<'_> {
         batch.height
     }
 
-    /// Chat lines over the HUD (focused while the chat screen is open).
+    /// The chat screen is open on the second screen's panel (`game/second_screen/chat.rs`),
+    /// not over the world.
+    pub(super) fn chat_hosted(&self) -> bool {
+        #[cfg(target_os = "android")]
+        return self.hud_on_second_screen() && self.screen == Screen::Chat && self.title.is_none();
+        #[cfg(not(target_os = "android"))]
+        false
+    }
+    /// The chat screen's box (GUI width and height) while it is open on the second screen's
+    /// panel.
+    pub(super) fn hosted_chat_box(&self) -> Option<[f32; 2]> {
+        #[cfg(target_os = "android")]
+        return self
+            .chat_hosted()
+            .then(super::second_screen::chat_box)
+            .flatten();
+        #[cfg(not(target_os = "android"))]
+        None
+    }
+    /// Chat lines over the HUD (focused while the chat screen is open, unless it is open on
+    /// the second screen).
     pub(super) fn draw_chat(&mut self, batch: &mut HudBatch) {
-        let focused = self.screen == Screen::Chat;
+        let focused = self.screen == Screen::Chat && !self.chat_hosted();
         if self.ui.hide_gui && !focused {
             return;
         }
@@ -1187,7 +1242,14 @@ impl Game<'_> {
         // moves above it. Restored at the end so later HUD draws in this
         // frame keep the full height.
         let original_height = batch.height;
-        batch.height = Self::visible_chat_height(batch);
+        // On the second screen's panel: its own box, no system keyboard over it, and the
+        // history `lift` lower down the box than usual.
+        let lift = if self.hosted_chat_box().is_some() {
+            CHAT_LIFT
+        } else {
+            batch.height = Self::visible_chat_height(batch);
+            0.0
+        };
         // ChatScreen.updateNarrationState: the restricted prompt is
         // `displayMode.showRestrictedPrompt`, the abilities' restrictions.
         let in_bed = self.ui.in_bed_chat && self.sleeping.is_some();
@@ -1241,7 +1303,7 @@ impl Game<'_> {
         }
         // The hovered message part's tooltip (`renderComponentHoverEffect`),
         // or the text of the message tag under the cursor.
-        let height = batch.height as i32;
+        let height = (batch.height + lift) as i32;
         let (cx, cy) = (f64::from(self.cursor.0), f64::from(self.cursor.1));
         let wrap = (batch.width as i32 / 2).max(200);
         // handleTagIcon: the chat-modified icons over the cursor or its message.

@@ -1082,6 +1082,16 @@ impl HudBatch {
             inline_profiles: Vec::new(),
         }
     }
+    /// A batch at a fixed GUI scale (at least 1) instead of the window's: a second display's
+    /// panel, laid out for its own size.
+    pub fn with_scale(window: [u32; 2], scale: u32) -> Self {
+        let mut batch = Self::new(window);
+        let scale = scale.max(1);
+        batch.scale = scale as f32;
+        batch.width = (window[0] as f32 / scale as f32).ceil();
+        batch.height = (window[1] as f32 / scale as f32).ceil();
+        batch
+    }
     /// Draw the vertices added since `start` with the inverting blend.
     pub fn invert_since(&mut self, start: usize) {
         self.blend_since(start, Blend::Invert);
@@ -1214,6 +1224,61 @@ impl HudBatch {
             start as u32..self.vertices.len() as u32,
             Blend::Depth([x0, y0, x1.saturating_sub(x0), y1.saturating_sub(y0)]),
         ));
+    }
+    /// Move what was drawn since `start` by (`dx`, `dy`) GUI pixels, depth scissors included: a
+    /// part laid out for one place (the hotbar, at the bottom) shown at another.
+    pub fn translate_since(&mut self, start: usize, dx: f32, dy: f32) {
+        for v in &mut self.vertices[start..] {
+            v.pos[0] += dx;
+            v.pos[1] += dy;
+        }
+        let px = (dx * self.scale).round() as i64;
+        let py = (dy * self.scale).round() as i64;
+        for (range, blend) in &mut self.blends {
+            if range.start as usize >= start
+                && let Blend::Depth(scissor) = blend
+            {
+                scissor[0] = (i64::from(scissor[0]) + px).max(0) as u32;
+                scissor[1] = (i64::from(scissor[1]) + py).max(0) as u32;
+            }
+        }
+    }
+    /// Draw `other`, laid out at its own GUI scale for another window, moved by (`dx`, `dy`)
+    /// GUI pixels: its vertices keep their GUI coordinates, its depth scissors are rescaled to
+    /// this batch's pixels and clamped to its top-left edge.
+    pub fn append(&mut self, other: HudBatch, dx: f32, dy: f32) {
+        self.append_scaled(other, 1.0, dx, dy);
+    }
+    /// `append`, with `other`'s GUI pixels `k` of this batch's: a part drawn at its own scale.
+    pub fn append_scaled(&mut self, other: HudBatch, k: f32, dx: f32, dy: f32) {
+        let start = self.vertices.len() as u32;
+        let ratio = self.scale / other.scale * k;
+        self.vertices
+            .extend(other.vertices.into_iter().map(|mut v| {
+                v.pos[0] = v.pos[0] * k + dx;
+                v.pos[1] = v.pos[1] * k + dy;
+                v
+            }));
+        let (ox, oy) = (dx * self.scale, dy * self.scale);
+        for (range, blend) in other.blends {
+            let blend = match blend {
+                Blend::Depth([x, y, w, h]) => {
+                    let edge = |at: u32, offset: f32| (at as f32 * ratio + offset).round().max(0.0);
+                    let (x0, y0) = (edge(x, ox), edge(y, oy));
+                    let (x1, y1) = (edge(x + w, ox), edge(y + h, oy));
+                    Blend::Depth([x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32])
+                }
+                blend => blend,
+            };
+            self.blends
+                .push((range.start + start..range.end + start, blend));
+        }
+        self.patches.extend(other.patches);
+        self.inline_profiles.extend(other.inline_profiles);
+        self.glint_alpha = other.glint_alpha;
+        if other.end_portal != EndPortalFill::default() {
+            self.end_portal = other.end_portal;
+        }
     }
     pub fn rect_uv(&mut self, x: f32, y: f32, w: f32, h: f32, r: Rect, color: u32) {
         self.quad(
@@ -1780,6 +1845,8 @@ pub struct HudRenderer {
     capacity: u64,
     format: wgpu::TextureFormat,
     atlas_view: wgpu::TextureView,
+    /// The glint texture and sampler, for `sibling`.
+    glint: (wgpu::TextureView, wgpu::Sampler),
     /// The resource pack's text shader, when it has one that works.
     pack_text: Option<pack_text::PackText>,
     /// Target pixels per window pixel: above 1 for a screenshot drawn larger than the
@@ -2013,9 +2080,23 @@ impl HudRenderer {
             capacity,
             format,
             atlas_view: view.clone(),
+            glint: (glint_view.clone(), glint_sampler.clone()),
             pack_text: None,
             zoom: 1.0,
         })
+    }
+    /// A renderer for another target format that draws from the same atlas and glint: a second
+    /// display's panel (`gfx::panel`). Its own vertices and uniform, so both draw in one frame.
+    pub fn sibling(&self, device: &wgpu::Device, format: wgpu::TextureFormat) -> Result<Self> {
+        let mut hud = Self::new(
+            device,
+            format,
+            &self.atlas_view,
+            &self.glint.0,
+            &self.glint.1,
+        )?;
+        hud.atlas_texture = self.atlas_texture.clone();
+        Ok(hud)
     }
     /// Draw the GUI's text with `shader` (`HudAtlas::text_shader`), or natively.
     pub fn set_text_shader(

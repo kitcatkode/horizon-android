@@ -59,6 +59,8 @@ mod search_queue;
 mod secure_store;
 #[path = "android/shader_catalog.rs"]
 mod shader_catalog;
+#[path = "android/second_screen.rs"]
+mod second_screen;
 #[rustfmt::skip]
 #[allow(dead_code)]
 #[path = "../../../launcher/src/skins.rs"]

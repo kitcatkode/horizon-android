@@ -8,3 +8,7 @@ rectangle as presentation, including resolution scaling. New touches outside
 that rectangle are ignored; existing gestures still receive their releases.
 Desktop backends retain their upstream behaviour. A stock Android NativeActivity host is used for full
 mouse input; no project Java/Kotlin host is included.
+
+Android controller keys (Back, D-pad and the standard gamepad buttons) are delivered as
+`DeviceEvent::Button`. A controller that also has its own B button (the AYN Thor's built-in
+pad) keeps its Back key as Android's Back (`set_native_system_back`).

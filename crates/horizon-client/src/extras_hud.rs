@@ -67,14 +67,19 @@ pub fn draw_minimap(
     corners: &mut Corners,
     look: &MinimapLook,
 ) {
+    let (x, y) = corners.place(look.corner, look.size, look.size);
+    draw_minimap_at(batch, atlas, x, y, look);
+}
+
+/// The minimap with its top left corner at (`x`, `y`), `look.corner` aside.
+pub fn draw_minimap_at(batch: &mut HudBatch, atlas: &HudAtlas, x: f32, y: f32, look: &MinimapLook) {
     let MinimapLook {
-        corner,
         size,
         image,
         arrow,
         north,
+        ..
     } = *look;
-    let (x, y) = corners.place(corner, size, size);
     batch.rect_uv(x, y, size, size, image, u32::MAX);
     let (cx, cy) = (x + size / 2.0, y + size / 2.0);
     if let Some(r) = atlas.sprites.get("map/decorations/player").copied() {
