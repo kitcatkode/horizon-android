@@ -421,6 +421,10 @@ impl Game<'_> {
         if !self.pad_in_menu() {
             self.open_chat("");
         }
+        // The chat on the second screen's panel has its own keyboard there.
+        if self.chat_hosted() {
+            return;
+        }
         let initial = if self.dialog_open() {
             self.dialog_edit_value()
         } else if self.screen == Screen::BlockEditor {

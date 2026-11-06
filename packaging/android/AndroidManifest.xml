@@ -16,8 +16,10 @@
         <activity android:name="dev.horizon.android.HorizonActivity" android:exported="false" android:screenOrientation="sensorLandscape" android:configChanges="orientation|screenSize|keyboardHidden|keyboard|density|screenLayout" android:windowSoftInputMode="adjustResize" android:theme="@style/HorizonGameTheme">
             <meta-data android:name="android.app.lib_name" android:value="horizon_android" />
         </activity>
+        <!-- Starts the game on the main display: a lower-screen launcher (AYN Thor) starts apps there. -->
+        <activity android:name="dev.horizon.android.HorizonLauncher" android:exported="false" android:taskAffinity="" android:theme="@android:style/Theme.NoDisplay" android:excludeFromRecents="true" android:noHistory="true" />
         <!-- Keep installed launcher shortcuts targeting the previous component. -->
-        <activity-alias android:name="com.google.androidgamesdk.GameActivity" android:targetActivity="dev.horizon.android.HorizonActivity" android:exported="true">
+        <activity-alias android:name="com.google.androidgamesdk.GameActivity" android:targetActivity="dev.horizon.android.HorizonLauncher" android:exported="true">
             <meta-data android:name="android.app.lib_name" android:value="horizon_android" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

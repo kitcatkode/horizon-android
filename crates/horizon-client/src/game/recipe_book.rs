@@ -147,6 +147,11 @@ impl Game<'_> {
             _ => 0.0,
         }
     }
+    /// The open book's left edge, its tabs included, when it sits beside the menu.
+    #[cfg(target_os = "android")]
+    pub(super) fn recipe_book_left(&self, batch: &HudBatch) -> Option<f32> {
+        (self.recipe_book_shift(batch.width) > 0.0).then(|| self.book_origin(batch).0 - 30.0)
+    }
     /// `AbstractRecipeBookScreen.isHovering` is false while the book is
     /// visible in a window narrower than `NARROW`: the book covers the menu,
     /// so no slot is hovered or clicked.

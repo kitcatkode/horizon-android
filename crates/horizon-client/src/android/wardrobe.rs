@@ -390,13 +390,13 @@ impl Wardrobe {
         let width = ui.w;
         let compact = width < 700.0;
         let top = 160.0;
-        ui.text(Face::Medium, 26.0, 32.0, top, color::TEXT, "Skins & Capes");
+        ui.text(Face::Medium, 26.0, 32.0, top, color::text(), "Skins & Capes");
         ui.text(
             Face::Regular,
             13.0,
             32.0,
             top + 36.0,
-            color::MUTED,
+            color::muted(),
             "Local choices change your view. Cloud buttons update your account.",
         );
         let preview_width = if compact {
@@ -416,7 +416,7 @@ impl Wardrobe {
         };
         let py = top + 66.0;
         self.rect = [px, py, preview_width, preview_height];
-        ui.rounded(px, py, preview_width, preview_height, 4.0, color::RAISED);
+        ui.rounded(px, py, preview_width, preview_height, 4.0, color::raised());
         let scale = (preview_width / 160.0).min(preview_height / 200.0);
         let ox = px + (preview_width - 160.0 * scale) * 0.5;
         let oy = py + (preview_height - 200.0 * scale) * 0.5;
@@ -631,6 +631,6 @@ impl Wardrobe {
             (row + scroll + 38.0 - bottom).max(0.0),
         ];
         let note = ui.fit_text(Face::Regular, 12.0, &self.note, width - 64.0);
-        ui.text(Face::Regular, 12.0, 32.0, ui.h - 60.0, color::MUTED, &note);
+        ui.text(Face::Regular, 12.0, 32.0, ui.h - 60.0, color::muted(), &note);
     }
 }

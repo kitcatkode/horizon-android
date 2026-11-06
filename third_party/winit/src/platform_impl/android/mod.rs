@@ -38,6 +38,11 @@ static GAMEPAD_DEVICES: Mutex<Vec<i32>> = Mutex::new(Vec::new());
 pub(crate) fn set_gamepad_devices(ids: &[i32]) {
     *GAMEPAD_DEVICES.lock().unwrap() = ids.to_vec();
 }
+/// Controllers with a B button of their own: their Back key is the system's Back, not B.
+static SYSTEM_BACK_DEVICES: Mutex<Vec<i32>> = Mutex::new(Vec::new());
+pub(crate) fn set_system_back_devices(ids: &[i32]) {
+    *SYSTEM_BACK_DEVICES.lock().unwrap() = ids.to_vec();
+}
 static NATIVE_TEXT_INPUT_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn set_native_text_input_active(active: bool) {
@@ -643,7 +648,9 @@ impl<T: 'static> EventLoop<T> {
                     || GAMEPAD_DEVICES.lock().unwrap().contains(&key.device_id())
                 {
                     let code = u32::from(key.key_code());
-                    if matches!(code, 4 | 19..=22 | 96 | 97 | 99 | 100 | 102..=109) {
+                    let system_back =
+                        code == 4 && SYSTEM_BACK_DEVICES.lock().unwrap().contains(&key.device_id());
+                    if !system_back && matches!(code, 4 | 19..=22 | 96 | 97 | 99 | 100 | 102..=109) {
                         if key.action() == KeyAction::Down && key.repeat_count() > 0 {
                             return InputStatus::Handled;
                         }

@@ -220,6 +220,23 @@ pub(crate) fn with_context<R>(
         }
     })
 }
+/// Use the wallpaper's Material You colours (`HorizonActivity.materialScheme`, the roles of
+/// `ui_material::ROLES`) for the Material 3 interface; without them it keeps its scheme.
+pub fn refresh_material_scheme() {
+    let colors = with_context(|env, activity| {
+        let array = env.call_method(activity, "materialScheme", "()[I", &[])?.l()?;
+        let array = jni::objects::JIntArray::from(array);
+        let mut colors = vec![0; env.get_array_length(&array)? as usize];
+        env.get_int_array_region(&array, 0, &mut colors)?;
+        Ok(colors)
+    });
+    if let Some(colors) = colors.filter(|c| c.iter().any(|v| *v != 0)) {
+        let colors: Vec<u32> = colors.into_iter().map(|c| c as u32).collect();
+        horizon_client::ui_material::set_scheme(horizon_client::ui_material::Scheme::from_roles(
+            &colors,
+        ));
+    }
+}
 pub fn clipboard_get() -> Option<String> {
     with_context(|env, activity| {
         let name = JObject::from(env.new_string("clipboard")?);
@@ -680,6 +697,7 @@ pub fn poll_gamepad_connections() {
         let mut values = vec![0; env.get_array_length(&ids)? as usize];
         env.get_int_array_region(&ids, 0, &mut values)?;
         let mut controllers = Vec::new();
+        let mut system_back = Vec::new();
         for id in &values {
             let device = env
                 .call_static_method(
@@ -693,18 +711,34 @@ pub fn poll_gamepad_connections() {
                 let sources = env.call_method(&device, "getSources", "()I", &[])?.i()?;
                 if sources & 0x401 == 0x401 || sources & 0x01000010 == 0x01000010 {
                     controllers.push(*id);
+                    // KEYCODE_BUTTON_B (97): a pad with its own B button has a separate Back
+                    // key, which stays Android's Back.
+                    let keys = env.new_int_array(1)?;
+                    env.set_int_array_region(&keys, 0, &[97])?;
+                    let has = env
+                        .call_method(&device, "hasKeys", "([I)[Z", &[JValue::Object(&keys)])?
+                        .l()?;
+                    let has = jni::objects::JBooleanArray::from(has);
+                    let mut b = [0u8];
+                    env.get_boolean_array_region(&has, 0, &mut b)?;
+                    if b[0] != 0 {
+                        system_back.push(*id);
+                    }
+                    env.delete_local_ref(has)?;
+                    env.delete_local_ref(keys)?;
                 }
                 env.delete_local_ref(device)?;
             }
         }
-        Ok((values, controllers))
+        Ok((values, controllers, system_back))
     });
-    if let Some((ids, controllers)) = ids {
+    if let Some((ids, controllers, system_back)) = ids {
         horizon_client::android_runtime::retain_gamepads(&ids);
         if horizon_client::android_runtime::active_gamepad_id().is_none() {
             cancel_gamepad_vibration();
         }
         winit::platform::android::set_native_gamepads(&controllers);
+        winit::platform::android::set_native_system_back(&system_back);
     }
 }
 

@@ -268,6 +268,8 @@ mod screen_info;
 mod screens;
 mod sculk;
 mod sculk_fixture;
+#[cfg(target_os = "android")]
+mod second_screen;
 mod server_links;
 mod server_mods;
 mod server_packs;
@@ -7927,6 +7929,11 @@ impl Game<'_> {
         } else {
             self.hud_layers(size)
         };
+        // A screen on the second screen's panel draws its pointer there.
+        #[cfg(target_os = "android")]
+        let hosted = self.screen_hosted() || self.chat_hosted();
+        #[cfg(not(target_os = "android"))]
+        let hosted = false;
         self.draw_dialog(&mut batch);
         self.draw_pack_prompt(&mut batch);
         self.draw_code_of_conduct(&mut batch);
@@ -7946,9 +7953,183 @@ impl Game<'_> {
             self.frame_graph
                 .draw(self.settings.horizon.overlay, b, &self.gui.atlas);
         });
-        self.draw_pad_cursor(&mut batch);
+        if !hosted {
+            self.draw_pad_cursor(&mut batch);
+        }
         self.resolve_inline_profiles(&batch.inline_profiles);
         batch
+    }
+    /// Hud.extractItemHotbar (or the spectator's): on the main screen, or on the second
+    /// screen's panel (`game/second_screen.rs`).
+    fn draw_hotbar_hud(&mut self, batch: &mut HudBatch) {
+        let (wi, hi) = (batch.width as i32, batch.height as i32);
+        let spectator = self.spectator();
+        let indicator = self.settings.attack_indicator;
+        #[cfg(target_os = "android")]
+        let indicator =
+            horizon_client::touch::attack_indicator(indicator, self.interaction_crosshair());
+        let strength = self.hand_strength.scale(0.0, self.main_hand_attack_speed());
+        if spectator {
+            self.draw_spectator_hotbar(batch);
+        } else {
+            let partial = self.clock.fraction() as f32;
+            let inputs = hud_layout::HotbarInputs {
+                selected: self.selected as i32,
+                right_handed: !self.settings.main_hand_left,
+                offhand: self.offhand.is_some(),
+                slots: std::array::from_fn(|i| {
+                    self.inventory[i]
+                        .as_ref()
+                        .map(|_| (f32::from(self.hotbar_pop[i]) - partial).max(0.0))
+                }),
+                offhand_pop: (f32::from(self.hotbar_pop[9]) - partial).max(0.0),
+                attack: (indicator == 2).then_some(strength),
+            };
+            #[cfg(target_os = "android")]
+            let attack_left = Some(self.settings.touch.attack_indicator_left);
+            #[cfg(not(target_os = "android"))]
+            let attack_left = None;
+            let draws = hud_layout::hotbar_with_attack_side(wi, hi, &inputs, attack_left);
+            hud_layout::paint(batch, &self.gui.atlas, &draws);
+            for d in &draws {
+                if let hud_layout::GuiDraw::Item { slot, x, y, .. } = *d {
+                    let stack = if slot == 40 {
+                        self.offhand.as_ref()
+                    } else {
+                        self.inventory[slot as usize].as_ref()
+                    };
+                    if let Some(stack) = stack {
+                        self.draw_item(batch, stack, x as f32, y as f32);
+                    }
+                }
+            }
+        }
+    }
+    /// The bars above the hotbar (`Hud.nextContextualInfoState`), the mount's hearts, the
+    /// survival bars and the held item's name; the bars' height, which the titles and the
+    /// action bar sit above.
+    fn draw_status_bars(&mut self, batch: &mut HudBatch) -> i32 {
+        let (wi, hi) = (batch.width as i32, batch.height as i32);
+        let spectator = self.spectator();
+        // Hud.nextContextualInfoState: the jump bar, the experience bar or
+        // the locator bar above the hotbar.
+        let has_experience = !self.creative && !spectator;
+        let contextual = horizon_client::locator_bar::ContextualBar::next(
+            self.waypoints.has_waypoints(),
+            !spectator && self.jumpable_mount(),
+            self.mount_jumping(),
+            has_experience,
+            self.experience_recent(),
+        );
+        use horizon_client::locator_bar::ContextualBar;
+        // The mount's hearts (and the jump bar).
+        let vehicle_hearts = if spectator {
+            0
+        } else {
+            self.draw_mount_hud(batch, wi, hi, contextual == ContextualBar::JumpableVehicle)
+        };
+        // Without the survival bars only the mount's hearts raise it.
+        let mut bar_height = 39 + 10 * ((vehicle_hearts + 9) / 10);
+        if contextual == ContextualBar::Locator {
+            let (sprite, [x, y, w, h]) = horizon_client::locator_bar::background(wi, hi);
+            horizon_client::ui::nine_slice(
+                batch,
+                &self.gui.atlas,
+                sprite,
+                x as f32,
+                y as f32,
+                w as f32,
+                h as f32,
+                u32::MAX,
+            );
+        }
+        if !self.creative
+            && !spectator
+            && let Some(p) = &mut self.player
+        {
+            let atlas = &self.gui.atlas;
+            let width = |s: &str| HudBatch::text_width(atlas, s) as i32;
+            let draws = hud_layout::experience(
+                wi,
+                hi,
+                self.experience.progress,
+                self.experience.level,
+                contextual == ContextualBar::Experience,
+                &width,
+            );
+            hud_layout::paint(batch, atlas, &draws);
+            let effects = &self.potions.effects;
+            let kind = if effects.get("poison").is_some() {
+                hud_layout::HeartKind::Poisoned
+            } else if effects.get("wither").is_some() {
+                hud_layout::HeartKind::Withered
+            } else if p.is_fully_frozen() {
+                hud_layout::HeartKind::Frozen
+            } else {
+                hud_layout::HeartKind::Normal
+            };
+            // Hud.extractAirBubbles: `isEyeInFluidMatching`, so the eyes are below
+            // the surface, not merely in the water block.
+            let under_water = p.is_eye_in_fluid(horizon_client::motion::WATER);
+            let inputs = hud_layout::HealthInputs {
+                tick: self.ticks as i32,
+                millis: self.started.elapsed().as_millis() as i64,
+                health: p.health.health(),
+                max_health: p.attribute("minecraft:max_health").unwrap_or(20.0) as f32,
+                absorption: p.health.absorption(),
+                armor: p
+                    .attribute("minecraft:armor")
+                    .or_else(|_| p.attribute("armor"))
+                    .unwrap_or(0.0) as i32,
+                food: p.health.food.food,
+                saturation: p.health.food.saturation,
+                kind,
+                regeneration: effects.get("regeneration").is_some(),
+                hunger: effects.get("hunger").is_some(),
+                hardcore: self.level.hardcore,
+                damage_cooldown: p.health.hurt.cooldown > 0,
+                air: p.air,
+                max_air: 300,
+                under_water,
+                vehicle_hearts,
+            };
+            let at = [p.position.x, p.position.y, p.position.z];
+            // The native mods' health HUD (`native_health_hud`): a mod
+            // that answers draws every row instead.
+            let mut native_health_hud = None;
+            self.native_health_hud(&inputs, wi, hi, &mut native_health_hud);
+            let draws = match native_health_hud {
+                Some(draws) => draws,
+                None => self.health_hud.layout(&inputs, wi, hi),
+            };
+            // A fresh borrow: the hook ran with all of `self`.
+            let atlas = &self.gui.atlas;
+            hud_layout::paint(batch, atlas, &draws);
+            bar_height = self
+                .health_hud
+                .left_height
+                .max(self.health_hud.right_height);
+            // Hud.playAirBubblePoppedSound: Player.playSound (PLAYERS), heard
+            // by this client only.
+            if let Some((volume, pitch)) = self.health_hud.bubble_pop_sound.take() {
+                let players = horizon_client::settings::SOUND_SOURCES
+                    .iter()
+                    .position(|s| *s == "player")
+                    .unwrap_or(0);
+                let capture = self.audio.capture.take();
+                self.audio
+                    .play_on(players, "ui.hud.bubble_pop", Some(at), volume, pitch);
+                self.audio.capture = capture;
+            }
+        }
+        if contextual == ContextualBar::Locator {
+            let draws = self.locator_bar_draws(wi, hi);
+            hud_layout::paint(batch, &self.gui.atlas, &draws);
+        }
+        if !spectator {
+            self.draw_selected_name(batch, bar_height, !self.creative);
+        }
+        bar_height
     }
     fn hud_layers(&mut self, size: [u32; 2]) -> HudBatch {
         let margins = self.hud_safe_margins();
@@ -8051,6 +8232,16 @@ impl Game<'_> {
         let spectator = self.spectator();
         let (wi, hi) = (w as i32, h as i32);
         let show_hud = !self.ui.hide_gui;
+        // The hotbar under the world's view moved to the second screen's panel.
+        #[cfg(target_os = "android")]
+        let moved = self.hud_on_second_screen();
+        #[cfg(not(target_os = "android"))]
+        let moved = false;
+        // So does the open inventory or container screen (`game/second_screen/host.rs`).
+        #[cfg(target_os = "android")]
+        let hosted = self.screen_hosted();
+        #[cfg(not(target_os = "android"))]
+        let hosted = false;
         // max(Hud.leftHeight, Hud.rightHeight) after the bars: the item name and
         // the action bar sit above it.
         let mut bar_height = 39;
@@ -8079,40 +8270,8 @@ impl Game<'_> {
                 let draws = hud_layout::crosshair(wi, hi, attack, full);
                 hud_layout::paint(&mut batch, &self.gui.atlas, &draws);
             }
-            if spectator {
-                self.draw_spectator_hotbar(&mut batch);
-            } else {
-                let partial = self.clock.fraction() as f32;
-                let inputs = hud_layout::HotbarInputs {
-                    selected: self.selected as i32,
-                    right_handed: !self.settings.main_hand_left,
-                    offhand: self.offhand.is_some(),
-                    slots: std::array::from_fn(|i| {
-                        self.inventory[i]
-                            .as_ref()
-                            .map(|_| (f32::from(self.hotbar_pop[i]) - partial).max(0.0))
-                    }),
-                    offhand_pop: (f32::from(self.hotbar_pop[9]) - partial).max(0.0),
-                    attack: (indicator == 2).then_some(strength),
-                };
-                #[cfg(target_os = "android")]
-                let attack_left = Some(self.settings.touch.attack_indicator_left);
-                #[cfg(not(target_os = "android"))]
-                let attack_left = None;
-                let draws = hud_layout::hotbar_with_attack_side(wi, hi, &inputs, attack_left);
-                hud_layout::paint(&mut batch, &self.gui.atlas, &draws);
-                for d in &draws {
-                    if let hud_layout::GuiDraw::Item { slot, x, y, .. } = *d {
-                        let stack = if slot == 40 {
-                            self.offhand.as_ref()
-                        } else {
-                            self.inventory[slot as usize].as_ref()
-                        };
-                        if let Some(stack) = stack {
-                            self.draw_item(&mut batch, stack, x as f32, y as f32);
-                        }
-                    }
-                }
+            if !moved {
+                self.draw_hotbar_hud(&mut batch);
             }
             horizon_client::hud::inset_overlay(&mut batch, margins, |b| self.draw_effect_icons(b));
             // Hud: the action bar and titles draw over the hotbar (nextStratum).
@@ -8121,129 +8280,11 @@ impl Game<'_> {
             self.draw_mod_shapes(&mut batch);
         }
         if show_hud {
-            // Hud.nextContextualInfoState: the jump bar, the experience bar or
-            // the locator bar above the hotbar.
-            let has_experience = !self.creative && !spectator;
-            let contextual = horizon_client::locator_bar::ContextualBar::next(
-                self.waypoints.has_waypoints(),
-                !spectator && self.jumpable_mount(),
-                self.mount_jumping(),
-                has_experience,
-                self.experience_recent(),
-            );
-            use horizon_client::locator_bar::ContextualBar;
-            // The mount's hearts (and the jump bar).
-            let vehicle_hearts = if spectator {
-                0
-            } else {
-                self.draw_mount_hud(
-                    &mut batch,
-                    wi,
-                    hi,
-                    contextual == ContextualBar::JumpableVehicle,
-                )
-            };
-            // Without the survival bars only the mount's hearts raise it.
-            bar_height = 39 + 10 * ((vehicle_hearts + 9) / 10);
-            if contextual == ContextualBar::Locator {
-                let (sprite, [x, y, w, h]) = horizon_client::locator_bar::background(wi, hi);
-                horizon_client::ui::nine_slice(
-                    &mut batch,
-                    &self.gui.atlas,
-                    sprite,
-                    x as f32,
-                    y as f32,
-                    w as f32,
-                    h as f32,
-                    u32::MAX,
-                );
-            }
-            if !self.creative
-                && !spectator
-                && let Some(p) = &mut self.player
-            {
-                let atlas = &self.gui.atlas;
-                let width = |s: &str| HudBatch::text_width(atlas, s) as i32;
-                let draws = hud_layout::experience(
-                    wi,
-                    hi,
-                    self.experience.progress,
-                    self.experience.level,
-                    contextual == ContextualBar::Experience,
-                    &width,
-                );
-                hud_layout::paint(&mut batch, atlas, &draws);
-                let effects = &self.potions.effects;
-                let kind = if effects.get("poison").is_some() {
-                    hud_layout::HeartKind::Poisoned
-                } else if effects.get("wither").is_some() {
-                    hud_layout::HeartKind::Withered
-                } else if p.is_fully_frozen() {
-                    hud_layout::HeartKind::Frozen
-                } else {
-                    hud_layout::HeartKind::Normal
-                };
-                // Hud.extractAirBubbles: `isEyeInFluidMatching`, so the eyes are below
-                // the surface, not merely in the water block.
-                let under_water = p.is_eye_in_fluid(horizon_client::motion::WATER);
-                let inputs = hud_layout::HealthInputs {
-                    tick: self.ticks as i32,
-                    millis: self.started.elapsed().as_millis() as i64,
-                    health: p.health.health(),
-                    max_health: p.attribute("minecraft:max_health").unwrap_or(20.0) as f32,
-                    absorption: p.health.absorption(),
-                    armor: p
-                        .attribute("minecraft:armor")
-                        .or_else(|_| p.attribute("armor"))
-                        .unwrap_or(0.0) as i32,
-                    food: p.health.food.food,
-                    saturation: p.health.food.saturation,
-                    kind,
-                    regeneration: effects.get("regeneration").is_some(),
-                    hunger: effects.get("hunger").is_some(),
-                    hardcore: self.level.hardcore,
-                    damage_cooldown: p.health.hurt.cooldown > 0,
-                    air: p.air,
-                    max_air: 300,
-                    under_water,
-                    vehicle_hearts,
-                };
-                let at = [p.position.x, p.position.y, p.position.z];
-                // The native mods' health HUD (`native_health_hud`): a mod
-                // that answers draws every row instead.
-                let mut native_health_hud = None;
-                self.native_health_hud(&inputs, wi, hi, &mut native_health_hud);
-                let draws = match native_health_hud {
-                    Some(draws) => draws,
-                    None => self.health_hud.layout(&inputs, wi, hi),
-                };
-                // A fresh borrow: the hook ran with all of `self`.
-                let atlas = &self.gui.atlas;
-                hud_layout::paint(&mut batch, atlas, &draws);
-                bar_height = self
-                    .health_hud
-                    .left_height
-                    .max(self.health_hud.right_height);
-                // Hud.playAirBubblePoppedSound: Player.playSound (PLAYERS), heard
-                // by this client only.
-                if let Some((volume, pitch)) = self.health_hud.bubble_pop_sound.take() {
-                    let players = horizon_client::settings::SOUND_SOURCES
-                        .iter()
-                        .position(|s| *s == "player")
-                        .unwrap_or(0);
-                    let capture = self.audio.capture.take();
-                    self.audio
-                        .play_on(players, "ui.hud.bubble_pop", Some(at), volume, pitch);
-                    self.audio.capture = capture;
-                }
-            }
-            if contextual == ContextualBar::Locator {
-                let draws = self.locator_bar_draws(wi, hi);
-                hud_layout::paint(&mut batch, &self.gui.atlas, &draws);
-            }
-            if !spectator {
-                self.draw_selected_name(&mut batch, bar_height, !self.creative);
-            }
+            // With the hotbar on the second screen, the bars come down where it was.
+            let drop = if moved { 20 } else { 0 };
+            let start = batch.vertices.len();
+            bar_height = self.draw_status_bars(&mut batch) - drop;
+            batch.translate_since(start, 0.0, drop as f32);
         }
         // Hud.extractSleepOverlay: over all health/food bars, under titles and chat.
         let draws = hud_overlays::sleep_overlay(wi, hi, self.sleep_timer as i32);
@@ -8305,6 +8346,7 @@ impl Game<'_> {
             Screen::CommandBlock => self.draw_command_block(&mut batch),
             Screen::BlockEditor => self.draw_block_editor(&mut batch),
             Screen::DebugOptions => self.draw_debug_options(&mut batch),
+            Screen::Inventory | Screen::Creative if hosted => {}
             Screen::Inventory => {
                 self.draw_inventory(&mut batch);
                 self.draw_mod_browser(&mut batch);
@@ -8312,6 +8354,7 @@ impl Game<'_> {
             Screen::Creative => {
                 self.draw_creative(&mut batch);
             }
+            Screen::Chat if self.chat_hosted() => {}
             Screen::Chat => self.draw_chat_screen(&mut batch),
             Screen::Mod => self.draw_mod_screen(&mut batch),
             Screen::Playing | Screen::Options | Screen::Win => {}
@@ -16063,6 +16106,8 @@ impl ApplicationHandler for Game<'_> {
     /// applicationWillTerminate without a CloseRequested; vanilla's GLFW
     /// window turns it into a window close, so Minecraft.stop saves the world.
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        #[cfg(target_os = "android")]
+        self.blank_second_screen();
         self.shut_down();
     }
 }
@@ -16324,8 +16369,9 @@ impl Game<'_> {
                         touch.location.x as f32 / batch.scale,
                         touch.location.y as f32 / batch.scale,
                     ];
-                    if let Some(slot) =
-                        horizon_client::touch::hotbar_slot(batch.width, batch.height, point)
+                    if !self.hud_on_second_screen()
+                        && let Some(slot) =
+                            horizon_client::touch::hotbar_slot(batch.width, batch.height, point)
                         && !self.pad.touch.control_at_point([
                             touch.location.x as f32 / size.width.max(1) as f32,
                             touch.location.y as f32 / size.height.max(1) as f32,
@@ -16386,8 +16432,16 @@ impl Game<'_> {
                 if !self.android_inventory_controls() {
                     self.pad.touch.clear();
                 }
+                // A chat open on the second screen's panel takes touches there.
+                if self.chat_hosted() {
+                    return;
+                }
                 if !matches!(self.screen, Screen::Inventory | Screen::Creative) {
                     self.android_menu_touch(touch, event_loop, id);
+                    return;
+                }
+                // The screen is on the second screen's panel, which takes its touches.
+                if self.screen_hosted() {
                     return;
                 }
                 if self.pad.touch_ui.virtual_mouse {
@@ -17658,6 +17712,8 @@ impl Game<'_> {
                     self.tick_world_icon();
                     let ticked = Instant::now();
                     let rendered = self.render()?;
+                    #[cfg(target_os = "android")]
+                    self.second_screen_frame(event_loop, id);
                     self.apply_cursor_icon();
                     if let Some(threshold) = self.options.spikes
                         && let Some(r) = self.renderer.as_ref()

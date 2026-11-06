@@ -135,9 +135,10 @@ impl Game<'_> {
     }
     /// The minimap a mod shows (`render.set-minimap`): its corner, its side
     /// in GUI pixels and its view of the player.
-    fn minimap_shown(&self) -> Option<(Corner, f32, View)> {
+    pub(super) fn minimap_shown(&self) -> Option<(Corner, f32, View)> {
         let p = self.player.as_ref()?;
-        if self.title.is_some() || self.ui.hide_gui {
+        // F1 hides the main screen's HUD; the second screen's panel keeps its map.
+        if self.title.is_some() || (self.ui.hide_gui && !self.map_on_second_screen()) {
             return None;
         }
         let m = self.minimap_wanted()?;
@@ -157,7 +158,16 @@ impl Game<'_> {
         if let Some(m) = self.native_minimap_now() {
             return Some(m);
         }
-        let m = self.mod_minimap()?;
+        let Some(m) = self.mod_minimap() else {
+            // The second screen's panel has a map of its own when no mod draws one.
+            return self.map_on_second_screen().then_some(NativeMinimap {
+                corner: Corner::TopLeft,
+                size: 128.0,
+                blocks_per_pixel: second_screen_map_scale(),
+                rotate: true,
+                round: false,
+            });
+        };
         Some(NativeMinimap {
             corner: m.corner,
             size: m.size,
@@ -250,7 +260,10 @@ impl Game<'_> {
     /// by the caller). The top left corner gives way to the debug screen.
     pub(super) fn draw_extras(&mut self, batch: &mut HudBatch) {
         let mod_panels = self.mods.has_panels();
-        let map = self.minimap_shown();
+        // The second screen's panel draws the map there instead.
+        let map = self
+            .minimap_shown()
+            .filter(|_| !self.map_on_second_screen());
         let visible = |corner| !(self.debug && corner == Corner::TopLeft);
         let mut corners = Corners::new(batch.width, batch.height, self.effect_rows_height());
         #[cfg(target_os = "android")]
@@ -293,4 +306,24 @@ impl Game<'_> {
         });
         if harmful { 50.0 } else { 25.0 }
     }
+    /// The minimap's image has been composed (and uploaded to `MINIMAP_SPRITE`).
+    #[cfg(target_os = "android")]
+    pub(super) fn minimap_ready(&self) -> bool {
+        !self.extras.minimap.image.is_empty()
+    }
+    /// The second screen's panel shows the map (`game/second_screen.rs`).
+    fn map_on_second_screen(&self) -> bool {
+        #[cfg(target_os = "android")]
+        return self.hud_on_second_screen();
+        #[cfg(not(target_os = "android"))]
+        false
+    }
+}
+
+/// The second screen's map zoom (its Map tab's buttons), in blocks per map pixel.
+fn second_screen_map_scale() -> f32 {
+    #[cfg(target_os = "android")]
+    return super::second_screen::map_blocks_per_pixel();
+    #[cfg(not(target_os = "android"))]
+    1.0
 }

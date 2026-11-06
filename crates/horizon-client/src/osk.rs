@@ -296,21 +296,16 @@ impl Keyboard {
         let height = 5.0 * KEY_H + 4.0 * GAP + 24.0 + 30.0;
         let x0 = ((ui.w - width) / 2.0).round();
         let y0 = if at_top { 16.0 } else { ui.h - height - 16.0 };
+        // Material 3: a low container with the extra-large shape, the letters on tonal plates,
+        // the keys that act on the field on the secondary container and Done filled.
+        let s = crate::ui_material::scheme();
         ui.rounded(
             x0 - 12.0,
             y0 - 12.0,
             width + 24.0,
             height,
-            ui_theme::RADIUS_PLATE,
-            color::with_alpha(color::BG, 0.94),
-        );
-        ui.border(
-            x0 - 12.0,
-            y0 - 12.0,
-            width + 24.0,
-            height,
-            ui_theme::RADIUS_PLATE,
-            color::BORDER,
+            crate::ui_material::SHAPE_EXTRA_LARGE,
+            color::with_alpha(s.surface_container_low, 0.96),
         );
         for (r, row) in self.rows().iter().enumerate() {
             let y = y0 + r as f32 * (KEY_H + GAP);
@@ -322,13 +317,37 @@ impl Keyboard {
                 let lit = matches!(key, Key::Shift) && (self.shift || self.caps)
                     || matches!(key, Key::Layer) && self.symbols;
                 let (plate, ink) = if focused {
-                    (color::ACCENT, color::ON_ACCENT)
+                    (s.primary, s.on_primary)
                 } else if lit {
-                    (color::HOVER, color::TEXT)
+                    (s.tertiary_container, s.on_tertiary_container)
+                } else if *key == Key::Done {
+                    (s.primary_container, s.on_primary_container)
+                } else if matches!(key, Key::Char(_) | Key::Space) {
+                    (s.surface_container_highest, s.on_surface)
                 } else {
-                    (color::RAISED, color::TEXT)
+                    (s.secondary_container, s.on_secondary_container)
                 };
-                ui.rounded(x, y, w, KEY_H, ui_theme::RADIUS, plate);
+                ui.rounded(x, y, w, KEY_H, crate::ui_material::SHAPE_MEDIUM, plate);
+                // The keys that act on the field show their Material Symbol.
+                use crate::ui_material::icon;
+                let symbol = match key {
+                    Key::Shift if self.caps => Some((icon::KEYBOARD_CAPSLOCK, true)),
+                    Key::Shift => Some((icon::ARROW_UPWARD, self.shift)),
+                    Key::Backspace => Some((icon::BACKSPACE, false)),
+                    Key::Done => Some((icon::CHECK, false)),
+                    _ => None,
+                };
+                if let Some((symbol, filled)) = symbol {
+                    ui.icon(
+                        symbol,
+                        x + (w / 2.0 - 12.0).round(),
+                        y + (KEY_H / 2.0 - 12.0).round(),
+                        24.0,
+                        ink,
+                        filled,
+                    );
+                    continue;
+                }
                 let label = match key {
                     Key::Char(ch) => self.letter(*ch),
                     Key::Shift if self.caps => "CAPS".into(),
@@ -369,7 +388,7 @@ impl Keyboard {
             ui_theme::SMALL,
             x0 + width / 2.0,
             y0 + 5.0 * (KEY_H + GAP) + 2.0,
-            color::MUTED,
+            color::muted(),
             &line.join("   "),
         );
     }

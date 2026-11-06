@@ -7,6 +7,8 @@ mod chooser;
 mod gesture;
 #[path = "login.rs"]
 mod login;
+#[path = "launcher_nav.rs"]
+mod nav;
 #[path = "launcher_pages.rs"]
 mod pages;
 #[path = "wardrobe.rs"]
@@ -155,6 +157,8 @@ impl Launcher {
             game.exiting(events);
             drop(game);
         }
+        // The panel holds the game's device; the launcher draws nothing on the second screen.
+        crate::second_screen::close();
         crate::game::android_reset_bundled_mods();
         crate::document_store::set_game_active(false);
         crate::performance::stop();
@@ -450,6 +454,8 @@ impl Launcher {
 impl ApplicationHandler for Launcher {
     fn resumed(&mut self, events: &ActiveEventLoop) {
         self.configure_screen();
+        // The wallpaper may have changed while away.
+        crate::platform::refresh_material_scheme();
         if let Some(game) = &mut self.game {
             return game.resumed(events);
         }

@@ -5,6 +5,10 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
 };
 
+/// How much higher the pages' content sits than their own layout puts it: their header (title,
+/// account and tabs, 130 dp) became the frame's 72 dp top app bar.
+const PAGE_SHIFT: f32 = 130.0 - super::nav::APP_BAR;
+
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum Action {
     Page(Page),
@@ -85,6 +89,71 @@ pub(super) enum Action {
     GpuProfile,
 }
 
+/// A command's icon, shown on buttons wide enough for one (choosers show values instead).
+fn action_icon(action: Action) -> Option<char> {
+    use horizon_client::ui_material::icon;
+    Some(match action {
+        Action::Play => icon::PLAY_ARROW,
+        Action::Search => icon::SEARCH,
+        Action::Install(_) => icon::DOWNLOAD,
+        Action::Import(_) | Action::WardrobeImport => icon::FILE_OPEN,
+        Action::OpenFolder(_) | Action::WorldFiles | Action::GameFiles => icon::FOLDER_OPEN,
+        Action::DeleteLocal(_) | Action::ConfirmDeleteLocal => icon::DELETE,
+        Action::Next => icon::CHEVRON_RIGHT,
+        Action::Previous => icon::CHEVRON_LEFT,
+        Action::Logs => icon::DESCRIPTION,
+        Action::RecordPerformance => icon::SPEED,
+        Action::ExportPerformance => icon::UPLOAD,
+        Action::ExportDiagnostics => icon::BUG_REPORT,
+        Action::Account | Action::Profile => icon::ACCOUNT_CIRCLE,
+        Action::SignIn | Action::MicrosoftAccount | Action::ElySignIn | Action::DeviceSignIn => {
+            icon::LOGIN
+        }
+        Action::OfflineAccount | Action::SelectOffline => icon::PERSON,
+        Action::SavedAccounts => icon::HISTORY,
+        Action::WardrobeCloud | Action::WardrobeUseCloud => icon::CLOUD,
+        Action::WardrobeUpload => icon::CLOUD_UPLOAD,
+        Action::WardrobeRotate(d) if d < 0 => icon::ROTATE_LEFT,
+        Action::WardrobeRotate(_) => icon::ROTATE_RIGHT,
+        Action::WardrobeZoom(true) => icon::ZOOM_IN,
+        Action::WardrobeZoom(false) => icon::ZOOM_OUT,
+        Action::WardrobeHideCape => icon::VISIBILITY_OFF,
+        Action::CopyLoginCode => icon::CONTENT_COPY,
+        Action::CancelLogin | Action::CloseLogin | Action::Dismiss => icon::CLOSE,
+        Action::Repository | Action::LoginLink | Action::ReviewApp => icon::OPEN_IN_NEW,
+        Action::SignOut => icon::LOGOUT,
+        _ => return None,
+    })
+}
+
+/// The shape a target's state layer and focus ring follow: a pill for a control, a medium
+/// corner for a row or a card.
+fn target_radius(height: f32) -> f32 {
+    if height <= 60.0 {
+        height / 2.0
+    } else {
+        horizon_client::ui_material::SHAPE_MEDIUM
+    }
+}
+
+/// The pressed state layer: the content colour at Material 3's pressed opacity.
+fn pressed_layer() -> u32 {
+    use horizon_client::ui_material as m3;
+    m3::alpha(m3::scheme().on_surface, m3::PRESSED)
+}
+
+/// Where a text field's text starts in its `rect` (the search bar has its icon first); the
+/// caret follows it.
+pub(super) fn field_inset(action: Action) -> f32 {
+    if action == Action::Field("search") {
+        48.0
+    } else {
+        16.0
+    }
+}
+
+/// The launcher's button, as a Material 3 component: Play is the extended FAB, an accented
+/// button is filled and the others tonal; a text field is a search bar or an outlined field.
 pub(super) fn button(
     ui: &mut Ui,
     targets: &mut Vec<([f32; 4], Action)>,
@@ -93,38 +162,182 @@ pub(super) fn button(
     action: Action,
     accent: bool,
 ) {
+    use horizon_client::ui_material::{self as m3, Button, State, icon, scheme};
     let [x, y, w, h] = rect;
-    ui.rounded(
-        x,
-        y,
-        w,
-        h,
-        2.0,
-        if accent { color::ACCENT } else { color::RAISED },
-    );
-    let padding = (w * 0.12).clamp(4.0, 12.0);
-    let base = if w < 80.0 { 13.0 } else { 16.0 };
-    let font = if matches!(action, Action::Page(_)) {
-        (base * ((w - 2.0 * padding) / ui.measure(Face::Medium, base, label).max(1.0)).min(1.0))
-            .max(9.0)
-    } else {
-        base
-    };
-    let label = ui.fit_text(Face::Medium, font, label, w - 2.0 * padding);
-    ui.text(
-        Face::Medium,
-        font,
-        x + padding,
-        y + 11.0,
-        if accent {
-            color::ON_ACCENT
+    targets.push((rect, action));
+    if let Action::Field(_) = action {
+        let s = scheme();
+        let inset = field_inset(action);
+        if action == Action::Field("search") {
+            ui.rounded(x, y, w, h, h / 2.0, s.surface_container_high);
+            ui.icon(
+                icon::SEARCH,
+                x + 16.0,
+                y + (h - 24.0) / 2.0,
+                24.0,
+                s.on_surface_variant,
+                false,
+            );
         } else {
-            color::TEXT
-        },
-        &label,
+            ui.border(x, y, w, h, m3::SHAPE_EXTRA_SMALL, s.outline);
+        }
+        let text = ui.fit_text(Face::Medium, 16.0, label, w - inset - 12.0);
+        ui.text(Face::Medium, 16.0, x + inset, y + 11.0, s.on_surface, &text);
+        return;
+    }
+    let kind = if action == Action::Play {
+        Button::Fab
+    } else if accent {
+        Button::Filled
+    } else {
+        Button::Tonal
+    };
+    let symbol = action_icon(action);
+    if let Some(symbol) = symbol
+        && w < 120.0
+        && label.chars().count() <= 1
+    {
+        // An icon button: the symbol alone stands for the one-character label.
+        ui.m3_button(rect, kind, None, "", State::default());
+        let size = (h - 8.0).min(24.0);
+        let ink = if kind == Button::Filled {
+            scheme().on_primary
+        } else {
+            scheme().on_secondary_container
+        };
+        ui.icon(symbol, x + (w - size) / 2.0, y + (h - size) / 2.0, size, ink, false);
+        return;
+    }
+    let icon = symbol.filter(|_| w >= 120.0);
+    ui.m3_button(rect, kind, icon, label, State::default());
+}
+/// A Material 3 segmented button: the segments share an outlined pill, the selected one on the
+/// secondary container with a check before its label.
+fn segmented(
+    ui: &mut Ui,
+    targets: &mut Vec<([f32; 4], Action)>,
+    rect: [f32; 4],
+    segments: &[(&str, Action, bool)],
+) {
+    use horizon_client::ui_material::{LABEL_LARGE, icon, scheme};
+    let s = scheme();
+    let [x, y, w, h] = rect;
+    let each = w / segments.len() as f32;
+    let radius = h / 2.0;
+    for (i, (label, action, selected)) in segments.iter().enumerate() {
+        let sx = x + each * i as f32;
+        if *selected {
+            ui.rounded(sx, y, each, h, radius, s.secondary_container);
+            // Square the inner sides: only the pill's ends are round.
+            if i > 0 {
+                ui.rounded(sx, y, radius, h, 0.0, s.secondary_container);
+            }
+            if i + 1 < segments.len() {
+                ui.rounded(sx + each - radius, y, radius, h, 0.0, s.secondary_container);
+            }
+        }
+        if i > 0 {
+            ui.rounded(sx, y, 1.0, h, 0.0, s.outline);
+        }
+        let ink = if *selected {
+            s.on_secondary_container
+        } else {
+            s.on_surface
+        };
+        let text_w = ui.type_width(LABEL_LARGE, label);
+        let icon_w = if *selected { 18.0 + 8.0 } else { 0.0 };
+        let left = sx + ((each - text_w - icon_w) / 2.0).max(4.0);
+        if *selected {
+            ui.icon(icon::CHECK, left, y + (h - 18.0) / 2.0, 18.0, ink, false);
+        }
+        let label = ui.fit_text(LABEL_LARGE.face, LABEL_LARGE.size, label, each - icon_w - 8.0);
+        ui.type_text(
+            LABEL_LARGE,
+            left + icon_w,
+            y + (h - LABEL_LARGE.line) / 2.0,
+            ink,
+            &label,
+        );
+        targets.push(([sx, y, each, h], *action));
+    }
+    ui.border(x, y, w, h, radius, s.outline);
+}
+
+/// A Files section's header, as an expandable Material 3 list item: the kind's icon, its name
+/// and count, and the arrow that says whether it is open.
+#[allow(clippy::too_many_arguments)]
+fn section_header(
+    ui: &mut Ui,
+    targets: &mut Vec<([f32; 4], Action)>,
+    rect: [f32; 4],
+    kind: horizon_client::content_files::Kind,
+    count: usize,
+    open: bool,
+    action: Action,
+) {
+    use horizon_client::content_files::Kind;
+    use horizon_client::ui_material::{BODY_MEDIUM, SHAPE_MEDIUM, TITLE_MEDIUM, icon, scheme};
+    let s = scheme();
+    let [x, y, w, h] = rect;
+    ui.rounded(x, y, w, h, SHAPE_MEDIUM, s.surface_container);
+    let symbol = match kind {
+        Kind::Mods => icon::EXTENSION,
+        Kind::Packs => icon::PALETTE,
+        Kind::Shaders => icon::AUTO_AWESOME,
+    };
+    ui.icon(symbol, x + 16.0, y + (h - 24.0) / 2.0, 24.0, s.on_surface_variant, false);
+    let title_x = x + 16.0 + 24.0 + 16.0;
+    let title_w = ui.type_text(
+        TITLE_MEDIUM,
+        title_x,
+        y + (h - TITLE_MEDIUM.line) / 2.0,
+        s.on_surface,
+        kind.label(),
+    );
+    let count = count.to_string();
+    ui.type_text(
+        BODY_MEDIUM,
+        title_x + title_w + 12.0,
+        y + (h - BODY_MEDIUM.line) / 2.0,
+        s.on_surface_variant,
+        &count,
+    );
+    ui.icon(
+        if open { icon::EXPAND_LESS } else { icon::EXPAND_MORE },
+        x + w - 16.0 - 24.0,
+        y + (h - 24.0) / 2.0,
+        24.0,
+        s.on_surface_variant,
+        false,
     );
     targets.push((rect, action));
 }
+
+/// A Material 3 exposed dropdown menu: an outlined field with the value and a trailing arrow.
+fn menu_field(
+    ui: &mut Ui,
+    targets: &mut Vec<([f32; 4], Action)>,
+    rect: [f32; 4],
+    value: &str,
+    action: Action,
+) {
+    use horizon_client::ui_material::{BODY_LARGE, SHAPE_EXTRA_SMALL, icon, scheme};
+    let s = scheme();
+    let [x, y, w, h] = rect;
+    ui.border(x, y, w, h, SHAPE_EXTRA_SMALL, s.outline);
+    let text = ui.fit_text(BODY_LARGE.face, BODY_LARGE.size, value, w - 16.0 - 48.0);
+    ui.type_text(BODY_LARGE, x + 16.0, y + (h - BODY_LARGE.line) / 2.0, s.on_surface, &text);
+    ui.icon(
+        icon::EXPAND_MORE,
+        x + w - 12.0 - 24.0,
+        y + (h - 24.0) / 2.0,
+        24.0,
+        s.on_surface_variant,
+        false,
+    );
+    targets.push((rect, action));
+}
+
 fn toggle(
     ui: &mut Ui,
     targets: &mut Vec<([f32; 4], Action)>,
@@ -138,24 +351,14 @@ fn toggle(
         14.0,
         x,
         y + 11.0,
-        color::TEXT,
+        color::muted(),
         if on { "On" } else { "Off" },
     );
-    ui.rounded(
-        x + w - 52.0,
-        y + 8.0,
-        48.0,
-        24.0,
-        12.0,
-        if on { color::TEXT } else { color::HOVER },
-    );
-    ui.rounded(
-        x + w - if on { 26.0 } else { 50.0 },
-        y + 10.0,
-        20.0,
-        20.0,
-        10.0,
-        if on { color::BG } else { color::TEXT },
+    ui.m3_switch(
+        x + w - 56.0,
+        y + (h - 32.0) / 2.0,
+        on,
+        horizon_client::ui_material::State::default(),
     );
     targets.push(([x, y, w, h], action));
 }
@@ -249,56 +452,22 @@ impl Launcher {
         let (w, h) = (ui.w, ui.h);
         let scale = ui.density / ui.batch.scale;
         ui.batch
-            .fill(&gui.atlas, 0.0, 0.0, w * scale, h * scale, color::BG);
-        ui.text(
-            Face::Medium,
-            if w < 400.0 {
-                20.0
-            } else if w < 700.0 {
-                24.0
-            } else {
-                32.0
-            },
-            32.0,
-            if w < 700.0 { 12.0 } else { 28.0 },
-            color::TEXT,
-            &format!("Horizon Android {}", crate::backend::VERSION),
-        );
-        button(
+            .fill(&gui.atlas, 0.0, 0.0, w * scale, h * scale, color::bg());
+        // The Material 3 frame (`nav`): the rail or bar and the top app bar.
+        let frame = super::nav::draw(
             &mut ui,
             &mut self.targets,
-            [
-                if w < 700.0 { 32.0 } else { w - 320.0 },
-                if w < 700.0 { 47.0 } else { 24.0 },
-                if w < 700.0 { w - 64.0 } else { 288.0 },
-                if w < 700.0 { 34.0 } else { 46.0 },
-            ],
-            &self.login.status(&self.catalog.config.name),
-            Action::Account,
-            self.login.signed_in,
+            self.catalog.page,
+            &format!("Horizon Android {}", crate::backend::VERSION),
         );
-        let tabs = Page::ALL.len() as f32;
-        let tab_margin = if w < 700.0 { 16.0 } else { 32.0 };
-        let tab_width = (w - 2.0 * tab_margin) / tabs;
-        for (i, page) in Page::ALL.iter().enumerate() {
-            let x = tab_margin + i as f32 * tab_width;
-            button(
-                &mut ui,
-                &mut self.targets,
-                [x, 88.0, tab_width - 4.0, 42.0],
-                if w < 700.0 {
-                    match page {
-                        Page::Installed => "Files",
-                        Page::Settings => "Setup",
-                        _ => page.name(),
-                    }
-                } else {
-                    page.name()
-                },
-                Action::Page(*page),
-                *page == self.catalog.page,
-            );
-        }
+        // The pages keep their own layout, made for a header across the top that the frame
+        // replaced: they lay out beside the navigation, `PAGE_SHIFT` taller, and move into place
+        // under the top app bar.
+        let (full_w, full_h) = (w, h);
+        let (w, h) = (w - frame.left, frame.bottom + PAGE_SHIFT);
+        (ui.w, ui.h) = (w, h);
+        let page_vertices = ui.batch.vertices.len();
+        let page_targets = self.targets.len();
         let compact = w < 700.0;
         let page = self.catalog.page;
         if page == Page::Play {
@@ -312,7 +481,7 @@ impl Launcher {
                 32.0,
                 32.0,
                 top,
-                color::TEXT,
+                color::text(),
                 if installing {
                     "Getting your game ready"
                 } else if installed {
@@ -330,7 +499,7 @@ impl Launcher {
                 17.0,
                 32.0,
                 top + 47.0,
-                color::MUTED,
+                color::muted(),
                 &format!("Minecraft 26.3  /  Profile {}", self.catalog.config.profile),
             );
             if installing {
@@ -353,9 +522,9 @@ impl Launcher {
                             32.0,
                             y,
                             if index == current {
-                                color::TEXT
+                                color::text()
                             } else {
-                                color::MUTED
+                                color::muted()
                             },
                             &label,
                         );
@@ -366,7 +535,7 @@ impl Launcher {
                         18.0,
                         32.0,
                         top + 100.0,
-                        color::TEXT,
+                        color::text(),
                         progress.stage.label(),
                     );
                     ui.text(
@@ -374,7 +543,7 @@ impl Launcher {
                         15.0,
                         32.0,
                         top + 138.0,
-                        color::MUTED,
+                        color::muted(),
                         &format!("Step {} of 6", current + 1),
                     );
                 }
@@ -385,9 +554,9 @@ impl Launcher {
                 };
                 let overall = (current as f32 + fraction.clamp(0.0, 1.0)) / 6.0;
                 let bar_y = h - 152.0;
-                ui.rounded(32.0, bar_y, w - 64.0, 4.0, 2.0, color::RAISED);
+                ui.rounded(32.0, bar_y, w - 64.0, 4.0, 2.0, color::raised());
                 if overall > 0.0 {
-                    ui.rounded(32.0, bar_y, (w - 64.0) * overall, 4.0, 2.0, color::ACCENT);
+                    ui.rounded(32.0, bar_y, (w - 64.0) * overall, 4.0, 2.0, color::accent());
                 }
                 let detail = match progress.stage {
                     InstallStage::Download => format!(
@@ -406,7 +575,7 @@ impl Launcher {
                     14.0,
                     32.0,
                     bar_y + 12.0,
-                    color::MUTED,
+                    color::muted(),
                     &detail,
                 );
             } else {
@@ -429,7 +598,7 @@ impl Launcher {
                         17.0,
                         32.0,
                         top + 100.0 + index as f32 * 42.0,
-                        color::MUTED,
+                        color::muted(),
                         line,
                     );
                 }
@@ -439,15 +608,15 @@ impl Launcher {
                     Face::Medium,
                     19.0,
                     32.0,
-                    h - 90.0,
-                    color::TEXT,
+                    h - 112.0,
+                    color::text(),
                     progress.stage.label(),
                 );
             } else {
                 button(
                     &mut ui,
                     &mut self.targets,
-                    [32.0, h - 100.0, 320.0, 60.0],
+                    [32.0, h - 128.0, 240.0, 56.0],
                     if installed {
                         "Play"
                     } else if self.error.is_some() {
@@ -470,7 +639,7 @@ impl Launcher {
                 18.0,
                 32.0,
                 142.0,
-                color::TEXT,
+                color::text(),
                 if page == Page::Mods {
                     "Horizon Mods"
                 } else if page == Page::Shaders {
@@ -510,29 +679,28 @@ impl Launcher {
             if matches!(page, Page::Shaders | Page::Mods) {
                 use crate::shader_catalog::Origin;
                 let width = ((w - 185.0) / 2.0).clamp(58.0, 120.0);
-                for (i, origin) in [Origin::Horizon, Origin::Modrinth].into_iter().enumerate() {
-                    let rect = [w - 32.0 - (2 - i) as f32 * width, 134.0, width - 5.0, 32.0];
-                    button(
-                        &mut ui,
-                        &mut self.targets,
-                        rect,
+                let selected = if page == Page::Mods {
+                    self.catalog.config.mod_source
+                } else {
+                    self.catalog.config.shader_source
+                };
+                let segments = [Origin::Horizon, Origin::Modrinth].map(|origin| {
+                    (
                         origin.source().label(),
                         if page == Page::Mods {
                             Action::ModSource(origin)
                         } else {
                             Action::ShaderSource(origin)
                         },
-                        false,
-                    );
-                    if (if page == Page::Mods {
-                        self.catalog.config.mod_source
-                    } else {
-                        self.catalog.config.shader_source
-                    }) == origin
-                    {
-                        ui.border(rect[0], rect[1], rect[2], rect[3], 1.0, color::TEXT);
-                    }
-                }
+                        origin == selected,
+                    )
+                });
+                segmented(
+                    &mut ui,
+                    &mut self.targets,
+                    [w - 32.0 - 2.0 * width, 132.0, 2.0 * width, 36.0],
+                    &segments,
+                );
             }
             let hint = match page {
                 Page::Mods
@@ -552,7 +720,7 @@ impl Launcher {
                 _ => "Verified downloads / enable in Installed",
             };
             let hint = ui.fit_text(Face::Regular, 14.0, hint, w - 64.0);
-            ui.text(Face::Regular, 14.0, 32.0, 270.0, color::MUTED, &hint);
+            ui.text(Face::Regular, 14.0, 32.0, 270.0, color::muted(), &hint);
             let kind = match page {
                 Page::Mods => horizon_client::content_files::Kind::Mods,
                 Page::Shaders => horizon_client::content_files::Kind::Shaders,
@@ -620,8 +788,8 @@ impl Launcher {
                 }
                 let title = ui.fit_text(Face::Medium, 19.0, title, w - 214.0);
                 let summary = ui.fit_text(Face::Regular, 14.0, description, w - 214.0);
-                ui.text(Face::Medium, 19.0, 32.0, y, color::TEXT, &title);
-                ui.text(Face::Regular, 14.0, 32.0, y + 29.0, color::MUTED, &summary);
+                ui.text(Face::Medium, 19.0, 32.0, y, color::text(), &title);
+                ui.text(Face::Regular, 14.0, 32.0, y + 29.0, color::muted(), &summary);
                 button(
                     &mut ui,
                     &mut self.targets,
@@ -651,10 +819,10 @@ impl Launcher {
                 }
                 let title = ui.fit_text(Face::Medium, 19.0, &p.title, w - 214.0);
                 let summary = ui.fit_text(Face::Regular, 14.0, &p.summary, w - 214.0);
-                ui.text(Face::Medium, 19.0, 32.0, y, color::TEXT, &title);
-                ui.text(Face::Regular, 14.0, 32.0, y + 29.0, color::MUTED, &summary);
+                ui.text(Face::Medium, 19.0, 32.0, y, color::text(), &title);
+                ui.text(Face::Regular, 14.0, 32.0, y + 29.0, color::muted(), &summary);
                 if let Some(state) = download {
-                    ui.text(Face::Medium, 16.0, w - 150.0, y + 12.0, color::TEXT, &state);
+                    ui.text(Face::Medium, 16.0, w - 150.0, y + 12.0, color::text(), &state);
                 } else if p.kind == crate::browser::Kind::Mod
                     && p.source == crate::browser::SourceId::Modrinth
                 {
@@ -663,7 +831,7 @@ impl Launcher {
                         14.0,
                         w - 150.0,
                         y + 12.0,
-                        color::MUTED,
+                        color::muted(),
                         "Java mod",
                     );
                 } else if crate::catalog::source_only_mod(p) {
@@ -672,7 +840,7 @@ impl Launcher {
                         14.0,
                         w - 150.0,
                         y + 12.0,
-                        color::MUTED,
+                        color::muted(),
                         ".hnmod: later",
                     );
                 } else if p.kind == crate::browser::Kind::Mod && !cfg!(target_pointer_width = "64")
@@ -682,7 +850,7 @@ impl Launcher {
                         14.0,
                         w - 150.0,
                         y + 12.0,
-                        color::MUTED,
+                        color::muted(),
                         "64-bit required",
                     );
                 } else {
@@ -736,27 +904,19 @@ impl Launcher {
             for (section, kind) in Kind::ALL.into_iter().enumerate() {
                 let count = self.catalog.local.iter().filter(|e| e.kind == kind).count();
                 let y = top + offset - self.catalog.scroll;
-                let label = format!(
-                    "{} {} ({count})",
-                    if self.catalog.sections[section] {
-                        "-"
-                    } else {
-                        "+"
-                    },
-                    kind.label()
-                );
                 self.list_targets
                     .push(([32.0, y, w - 210.0, 40.0], Action::ToggleSection(section)));
                 self.list_targets
                     .push(([w - 165.0, y, 133.0, 40.0], Action::Import(kind)));
                 if y >= top && y + 40.0 <= bottom {
-                    button(
+                    section_header(
                         &mut ui,
                         &mut self.targets,
                         [32.0, y, w - 210.0, 40.0],
-                        &label,
+                        kind,
+                        count,
+                        self.catalog.sections[section],
                         Action::ToggleSection(section),
-                        false,
                     );
                     button(
                         &mut ui,
@@ -802,13 +962,13 @@ impl Launcher {
                         &item.title,
                         if compact { w - 64.0 } else { w - 364.0 },
                     );
-                    ui.text(Face::Medium, 19.0, 32.0, y, color::TEXT, &title);
+                    ui.text(Face::Medium, 19.0, 32.0, y, color::text(), &title);
                     ui.text(
                         Face::Regular,
                         14.0,
                         32.0,
                         y + 28.0,
-                        color::MUTED,
+                        color::muted(),
                         kind.label(),
                     );
                     if kind == Kind::Mods && !cfg!(target_pointer_width = "64") {
@@ -817,7 +977,7 @@ impl Launcher {
                             14.0,
                             if compact { 32.0 } else { w - 300.0 },
                             y + if compact { 62.0 } else { 12.0 },
-                            color::MUTED,
+                            color::muted(),
                             "64-bit required",
                         );
                     } else {
@@ -851,7 +1011,7 @@ impl Launcher {
                 24.0,
                 32.0,
                 156.0,
-                color::TEXT,
+                color::text(),
                 "Launch settings",
             );
             let row_height = if compact { 82.0 } else { 66.0 };
@@ -1001,7 +1161,7 @@ impl Launcher {
                     16.0,
                     32.0,
                     y + if compact { 0.0 } else { 13.0 },
-                    color::MUTED,
+                    color::muted(),
                     title,
                 );
                 if matches!(
@@ -1026,36 +1186,26 @@ impl Launcher {
                         action,
                     );
                 } else {
-                    button(
-                        &mut ui,
-                        &mut self.targets,
-                        [
-                            if compact { 32.0 } else { w * 0.36 },
-                            y + if compact { 24.0 } else { 0.0 },
-                            if compact { w - 64.0 } else { w * 0.64 - 32.0 },
-                            46.0,
-                        ],
-                        &format!(
-                            "{} {}",
-                            value,
-                            if matches!(
-                                action,
-                                Action::Renderer
-                                    | Action::Aspect
-                                    | Action::DisplayHz
-                                    | Action::RenderScale
-                                    | Action::Profile
-                                    | Action::Orientation
-                                    | Action::InputHost
-                            ) {
-                                "v"
-                            } else {
-                                ""
-                            }
-                        ),
+                    let rect = [
+                        if compact { 32.0 } else { w * 0.36 },
+                        y + if compact { 24.0 } else { 0.0 },
+                        if compact { w - 64.0 } else { w * 0.64 - 32.0 },
+                        46.0,
+                    ];
+                    if matches!(
                         action,
-                        false,
-                    );
+                        Action::Renderer
+                            | Action::Aspect
+                            | Action::DisplayHz
+                            | Action::RenderScale
+                            | Action::Profile
+                            | Action::Orientation
+                            | Action::InputHost
+                    ) {
+                        menu_field(&mut ui, &mut self.targets, rect, &value, action);
+                    } else {
+                        button(&mut ui, &mut self.targets, rect, &value, action, false);
+                    }
                 }
                 ui.rounded(
                     32.0,
@@ -1063,7 +1213,7 @@ impl Launcher {
                     w - 64.0,
                     1.0,
                     0.0,
-                    color::BORDER,
+                    color::border(),
                 );
             }
             button(
@@ -1083,32 +1233,48 @@ impl Launcher {
                 false,
             );
         }
-        let status = self.error.as_deref().unwrap_or(&self.catalog.status);
-        for (i, line) in status
-            .chars()
-            .collect::<Vec<_>>()
-            .chunks(110)
-            .take(2)
-            .enumerate()
         {
-            ui.text(
-                Face::Regular,
-                14.0,
-                32.0,
-                h - 47.0 + i as f32 * 18.0,
-                color::MUTED,
-                &ui.fit_text(
-                    Face::Regular,
-                    14.0,
-                    &line.iter().collect::<String>(),
-                    (w - 210.0).max(40.0),
-                ),
-            );
+            let k = ui.density / ui.batch.scale;
+            ui.batch
+                .translate_since(page_vertices, frame.left * k, -PAGE_SHIFT * k);
+            let place = |rect: &mut [f32; 4]| {
+                rect[0] += frame.left;
+                rect[1] -= PAGE_SHIFT;
+            };
+            for (rect, _) in &mut self.targets[page_targets..] {
+                place(rect);
+            }
+            for (rect, _) in &mut self.list_targets {
+                place(rect);
+            }
+            if let Some(view) = &mut self.list_view {
+                view[0] -= PAGE_SHIFT;
+                view[1] -= PAGE_SHIFT;
+            }
+        }
+        let (w, h) = (full_w, full_h);
+        (ui.w, ui.h) = (w, h);
+        // The footer stays on the real bottom edge, beside the rail: the status in body small,
+        // wrapped at words onto two lines at most, and GitHub as a text button.
+        let status = self.error.as_deref().unwrap_or(&self.catalog.status);
+        let text_w = (w - frame.left - 210.0).max(40.0);
+        let ty = horizon_client::ui_material::BODY_SMALL;
+        let lines =
+            horizon_client::ui_theme::wrapping_lines(&ui, ty.face, ty.size, status, text_w);
+        let shown = lines.len().min(2);
+        for (i, line) in lines.iter().take(2).enumerate() {
+            let line = if i == 1 && lines.len() > 2 {
+                ui.fit_text(ty.face, ty.size, &format!("{line} {}", lines[2]), text_w)
+            } else {
+                line.clone()
+            };
+            let y = frame.bottom - 16.0 - (shown - i) as f32 * ty.line;
+            ui.type_text(ty, frame.left + 32.0, y, color::muted(), &line);
         }
         button(
             &mut ui,
             &mut self.targets,
-            [w - 142.0, h - 52.0, 110.0, 32.0],
+            [w - 142.0, frame.bottom - 52.0, 110.0, 40.0],
             "GitHub",
             Action::Repository,
             false,
@@ -1139,8 +1305,8 @@ impl Launcher {
             let height = bottom - top;
             let thumb = (height * height / (height + maximum)).max(20.0).min(height);
             let y = top + (height - thumb) * (scroll / maximum).clamp(0.0, 1.0);
-            ui.rounded(w - 12.0, top, 4.0, height, 2.0, color::BORDER);
-            ui.rounded(w - 12.0, y, 4.0, thumb, 2.0, color::MUTED);
+            ui.rounded(w - 12.0, top, 4.0, height, 2.0, color::border());
+            ui.rounded(w - 12.0, y, 4.0, thumb, 2.0, color::muted());
         }
         let caret_visible = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1156,15 +1322,16 @@ impl Launcher {
                 if *action == Action::Field(name)
                     || (name == "render_scale" && *action == Action::RenderScale)
                 {
-                    let text = ui.fit_text(Face::Medium, 16.0, &value, w - 24.0);
-                    let caret_x = x + 12.0 + ui.measure(Face::Medium, 16.0, &text);
+                    let inset = field_inset(*action);
+                    let text = ui.fit_text(Face::Medium, 16.0, &value, w - inset - 12.0);
+                    let caret_x = x + inset + ui.measure(Face::Medium, 16.0, &text);
                     ui.rounded(
                         caret_x.min(x + w - 10.0),
                         y + 12.0,
                         1.0,
                         18.0,
                         0.0,
-                        color::TEXT,
+                        color::text(),
                     );
                 }
             }
@@ -1173,36 +1340,38 @@ impl Launcher {
             self.targets.clear();
             self.list_targets.clear();
             self.list_view = None;
-            ui.rounded(0.0, 0.0, w, h, 0.0, horizon_client::hud::rgba(0, 0, 0, 160));
-            let width = (w - 32.0).min(360.0);
+            // A Material 3 dialog over the scrim: its title and two text buttons at the end.
+            use horizon_client::ui_material::{self as m3, Button, State, scheme};
+            let s = scheme();
+            ui.rounded(0.0, 0.0, w, h, 0.0, m3::alpha(0xFF00_0000, 0.32));
+            let width = (w - 48.0).min(400.0);
             let x = (w - width) * 0.5;
-            let y = (h - 160.0) * 0.5;
-            ui.rounded(x, y, width, 160.0, 8.0, color::RAISED);
-            ui.text(
-                Face::Medium,
-                22.0,
-                x + 20.0,
+            let height = 176.0;
+            let y = (h - height) * 0.5;
+            ui.rounded(x, y, width, height, m3::SHAPE_EXTRA_LARGE, s.surface_container_high);
+            ui.type_text(
+                m3::HEADLINE_SMALL,
+                x + 24.0,
                 y + 24.0,
-                color::TEXT,
-                "Exit application?",
+                s.on_surface,
+                "Exit Horizon?",
             );
-            let bw = (width - 52.0) * 0.5;
-            button(
-                &mut ui,
-                &mut self.targets,
-                [x + 20.0, y + 92.0, bw, 44.0],
-                "Cancel",
-                Action::Dismiss,
-                false,
+            ui.type_text(
+                m3::BODY_MEDIUM,
+                x + 24.0,
+                y + 72.0,
+                s.on_surface_variant,
+                "Your worlds are saved.",
             );
-            button(
-                &mut ui,
-                &mut self.targets,
-                [x + 32.0 + bw, y + 92.0, bw, 44.0],
-                "Exit",
-                Action::ConfirmExit,
-                false,
-            );
+            let exit = [x + width - 24.0 - 88.0, y + height - 24.0 - 40.0, 88.0, 40.0];
+            let cancel = [exit[0] - 8.0 - 100.0, exit[1], 100.0, 40.0];
+            for (rect, label, action) in [
+                (cancel, "Cancel", Action::Dismiss),
+                (exit, "Exit", Action::ConfirmExit),
+            ] {
+                ui.m3_button(rect, Button::Text, None, label, State::default());
+                self.targets.push((rect, action));
+            }
         }
         if let Some(action) = self.pending_focus.take() {
             self.focus = self.targets.iter().position(|(_, a)| *a == action);
@@ -1210,7 +1379,7 @@ impl Launcher {
         if let Some(index) = self.focus
             && let Some(([x, y, w, h], _)) = self.targets.get(index)
         {
-            ui.border(*x - 2.0, *y - 2.0, *w + 4.0, *h + 4.0, 2.0, color::TEXT);
+            ui.focus_ring([*x, *y, *w, *h], target_radius(*h));
             self.cursor = (
                 f64::from((x + w / 2.0) * ui.density),
                 f64::from((y + h / 2.0) * ui.density),
@@ -1227,14 +1396,7 @@ impl Launcher {
                     && point[1] >= rect[1]
                     && point[1] <= rect[1] + rect[3]
             }) {
-                ui.rounded(
-                    *x,
-                    *y,
-                    *w,
-                    *h,
-                    2.0,
-                    horizon_client::hud::rgba(255, 255, 255, 48),
-                );
+                ui.rounded(*x, *y, *w, *h, target_radius(*h), pressed_layer());
             }
         }
         if !self.mouse_down
@@ -1243,14 +1405,7 @@ impl Launcher {
             && time.elapsed() < std::time::Duration::from_millis(160)
             && let Some(([x, y, w, h], _)) = self.targets.iter().find(|(_, a)| *a == action)
         {
-            ui.rounded(
-                *x,
-                *y,
-                *w,
-                *h,
-                2.0,
-                horizon_client::hud::rgba(255, 255, 255, 48),
-            );
+            ui.rounded(*x, *y, *w, *h, target_radius(*h), pressed_layer());
         }
         crate::documents::draw_ui(&mut ui);
         ui.finish();

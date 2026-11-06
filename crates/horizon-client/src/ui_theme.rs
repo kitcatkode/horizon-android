@@ -39,29 +39,43 @@ pub(crate) fn set_preference(dir: &Path, key: &str, value: Option<&str>) {
     let _ = std::fs::write(dir.join("horizon.txt"), out);
 }
 
-/// The dark palette (`horizon_theme::DARK`) in the HUD's colour encoding, plus the
-/// translucent plates the overlays draw over the game.
+/// The interface's colours: Material 3's dark scheme roles (`crate::ui_material`, the
+/// platform's dynamic colour when it has one), in the HUD's colour encoding.
 pub mod color {
-    use horizon_theme::DARK as P;
+    use crate::ui_material::scheme;
     pub const fn hex(c: u32, a: u8) -> u32 {
         (a as u32) << 24 | (c & 0xff) << 16 | (c >> 8 & 0xff) << 8 | (c >> 16 & 0xff)
     }
-    /// The page, under every veil.
-    pub const BG: u32 = hex(P.page, 255);
-    /// Hover plates, secondary buttons, fields, the segmented track: the
-    /// dark palette's soft plate, as ink over the veil so the plates read the
-    /// same over any backdrop (over the page colour they are `plate_soft`).
-    pub const RAISED: u32 = hex(P.ink, 20);
-    /// Pressed plates and a switch that is off (`plate`, the same way).
-    pub const HOVER: u32 = hex(P.ink, 36);
-    /// One-pixel rules between rows, slider tracks.
-    pub const BORDER: u32 = hex(P.rule, 255);
-    /// Text and selection (`ink`).
-    pub const TEXT: u32 = hex(P.ink, 255);
-    /// Values and secondary text (`ink_soft`).
-    pub const MUTED: u32 = hex(P.ink_soft, 255);
-    pub const ACCENT: u32 = hex(P.accent, 255);
-    pub const ON_ACCENT: u32 = hex(P.on_accent, 255);
+    /// The page, under every veil (`surface`).
+    pub fn bg() -> u32 {
+        scheme().surface
+    }
+    /// Plates, secondary buttons, fields, tracks (`surface_container_high`).
+    pub fn raised() -> u32 {
+        scheme().surface_container_high
+    }
+    /// Pressed plates and a switch that is off (`surface_container_highest`).
+    pub fn hover() -> u32 {
+        scheme().surface_container_highest
+    }
+    /// Rules between rows, slider tracks (`outline_variant`).
+    pub fn border() -> u32 {
+        scheme().outline_variant
+    }
+    /// Text and selection (`on_surface`).
+    pub fn text() -> u32 {
+        scheme().on_surface
+    }
+    /// Values and secondary text (`on_surface_variant`).
+    pub fn muted() -> u32 {
+        scheme().on_surface_variant
+    }
+    pub fn accent() -> u32 {
+        scheme().primary
+    }
+    pub fn on_accent() -> u32 {
+        scheme().on_primary
+    }
     pub(crate) fn with_alpha(c: u32, a: f32) -> u32 {
         let base = (c >> 24) as f32;
         (c & 0x00ff_ffff) | ((base * a.clamp(0.0, 1.0)).round() as u32) << 24
@@ -74,9 +88,6 @@ pub(crate) const BODY: f32 = horizon_theme::LABEL.px;
 /// The boot screen's wordmark (`DISPLAY`) and console lines (`MICRO`).
 pub(crate) const DISPLAY: f32 = horizon_theme::DISPLAY.px;
 pub(crate) const MICRO: f32 = horizon_theme::MICRO.px;
-/// Fields; plates (hover rows, selection); pills (buttons, segments).
-pub(crate) const RADIUS: f32 = horizon_theme::RADIUS;
-pub(crate) const RADIUS_PLATE: f32 = horizon_theme::RADIUS_PLATE;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Face {
@@ -86,19 +97,64 @@ pub enum Face {
     SemiBold,
     /// Counts, timestamps and the boot screen's console lines.
     Mono,
+    /// Material Symbols Rounded (`crate::ui_material::icon`), outlined and filled.
+    Icon,
+    IconFilled,
 }
 struct Fonts {
-    faces: [FontRef<'static>; 4],
+    faces: [FontRef<'static>; 6],
+}
+/// The platform's own interface faces, Material 3's: Android's variable Roboto at the three
+/// weights and its monospace face, read once from `/system/fonts`.
+#[cfg(target_os = "android")]
+fn system_faces() -> Option<[FontRef<'static>; 4]> {
+    use ab_glyph::VariableFont as _;
+    static FILES: std::sync::OnceLock<Option<(&'static [u8], &'static [u8])>> =
+        std::sync::OnceLock::new();
+    let (sans, mono) = (*FILES.get_or_init(|| {
+        let read = |name: &str| {
+            std::fs::read(Path::new("/system/fonts").join(name))
+                .ok()
+                .map(|bytes| &*Box::leak(bytes.into_boxed_slice()))
+        };
+        Some((read("Roboto-Regular.ttf")?, read("DroidSansMono.ttf")?))
+    }))?;
+    let weight = |w: f32| {
+        let mut font = FontRef::try_from_slice(sans).ok()?;
+        // A static Roboto has no axis: it stays as it is.
+        font.set_variation(b"wght", w);
+        Some(font)
+    };
+    Some([
+        weight(400.0)?,
+        weight(500.0)?,
+        weight(600.0)?,
+        FontRef::try_from_slice(mono).ok()?,
+    ])
+}
+#[cfg(not(target_os = "android"))]
+fn system_faces() -> Option<[FontRef<'static>; 4]> {
+    None
 }
 impl Fonts {
     fn load() -> Self {
         let f = |b: &'static [u8]| FontRef::try_from_slice(b).expect("bundled font");
-        Self {
-            faces: [
+        let [regular, medium, semibold, mono] = system_faces().unwrap_or_else(|| {
+            [
                 f(horizon_theme::fonts::GEIST_REGULAR),
                 f(horizon_theme::fonts::GEIST_MEDIUM),
                 f(horizon_theme::fonts::GEIST_SEMIBOLD),
                 f(horizon_theme::fonts::GEIST_MONO),
+            ]
+        });
+        Self {
+            faces: [
+                regular,
+                medium,
+                semibold,
+                mono,
+                f(horizon_theme::fonts::MATERIAL_SYMBOLS),
+                f(horizon_theme::fonts::MATERIAL_SYMBOLS_FILLED),
             ],
         }
     }
@@ -636,7 +692,7 @@ pub fn draw_boot_log(atlas: &HudAtlas, batch: &mut HudBatch, logs: &[String]) {
 
 /// The lines `text` wraps into at `max_w`, word-wise; a word wider than
 /// `max_w` on its own breaks at the edge.
-fn wrapping_lines(ui: &Ui, face: Face, size: f32, text: &str, max_w: f32) -> Vec<String> {
+pub fn wrapping_lines(ui: &Ui, face: Face, size: f32, text: &str, max_w: f32) -> Vec<String> {
     let mut lines = Vec::new();
     let mut line = String::new();
     for word in text.split(' ') {

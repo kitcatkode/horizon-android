@@ -233,14 +233,14 @@ impl Login {
         let h = (ui.h - 24.0).min(550.0);
         let x = (ui.w - w) / 2.0;
         let y = (ui.h - h) / 2.0;
-        ui.rounded(x, y, w, h, 8.0, color::BG);
+        ui.rounded(x, y, w, h, 8.0, color::bg());
         if self.providers {
             ui.text(
                 Face::Medium,
                 24.0,
                 x + 20.0,
                 y + 20.0,
-                color::TEXT,
+                color::text(),
                 "Accounts",
             );
             for (index, (label, action)) in [
@@ -277,7 +277,7 @@ impl Login {
                 24.0,
                 x + 20.0,
                 y + 20.0,
-                color::TEXT,
+                color::text(),
                 "Choose account",
             );
             button(
@@ -350,7 +350,7 @@ impl Login {
                 24.0,
                 x + 20.0,
                 y + 18.0,
-                color::TEXT,
+                color::text(),
                 "Ely.by account",
             );
             ui.text(
@@ -358,7 +358,7 @@ impl Login {
                 13.0,
                 x + 20.0,
                 y + 54.0,
-                color::MUTED,
+                color::muted(),
                 "Credentials go only to authserver.ely.by.",
             );
             for (index, (label, name, value, secret)) in [
@@ -389,7 +389,7 @@ impl Login {
                     continue;
                 }
                 let top = y + 86.0 + if active { 0.0 } else { index as f32 * 72.0 };
-                ui.text(Face::Regular, 13.0, x + 20.0, top, color::MUTED, label);
+                ui.text(Face::Regular, 13.0, x + 20.0, top, color::muted(), label);
                 let display = if secret {
                     "*".repeat(value.chars().count().min(40))
                 } else {
@@ -421,7 +421,7 @@ impl Login {
                 13.0,
                 x + 20.0,
                 y + 310.0,
-                color::TEXT,
+                color::text(),
                 &message,
             );
             button(
@@ -460,7 +460,7 @@ impl Login {
                 24.0,
                 x + 20.0,
                 y + 20.0,
-                color::TEXT,
+                color::text(),
                 "Offline player name",
             );
             ui.text(
@@ -468,7 +468,7 @@ impl Login {
                 16.0,
                 x + 20.0,
                 y + 66.0,
-                color::MUTED,
+                color::muted(),
                 "Maximum 16 characters.",
             );
             button(
@@ -507,7 +507,7 @@ impl Login {
             24.0,
             x + 20.0,
             y + 18.0,
-            color::TEXT,
+            color::text(),
             "Microsoft account",
         );
         ui.text(
@@ -516,9 +516,9 @@ impl Login {
             x + 20.0,
             y + 58.0,
             if self.signed_in {
-                color::ACCENT
+                color::accent()
             } else {
-                color::MUTED
+                color::muted()
             },
             &self.status(offline_name),
         );
@@ -537,7 +537,7 @@ impl Login {
                 16.0,
                 x + 20.0,
                 y + 104.0,
-                color::TEXT,
+                color::text(),
                 if self.signed_in {
                     "Account saved securely. Sessions renew automatically."
                 } else {
@@ -559,7 +559,7 @@ impl Login {
                     14.0,
                     x + 20.0,
                     y + 166.0 + row as f32 * 20.0,
-                    color::TEXT,
+                    color::text(),
                     &line,
                 );
                 row += 1;
@@ -579,7 +579,7 @@ impl Login {
                 14.0,
                 x + 20.0,
                 y + 166.0 + row as f32 * 20.0,
-                color::TEXT,
+                color::text(),
                 &line,
             );
         }

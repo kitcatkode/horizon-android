@@ -245,6 +245,31 @@ fn mod_commands_are_coloured_and_complete_like_vanilla_ones() {
 }
 
 #[test]
+fn tapping_a_completion_fills_it_in_without_showing_the_list() {
+    let font = font();
+    let m = Measure(&font);
+    let registries = Registries::default();
+    let modded = crate::command::vanilla::game_dispatcher().with_mod_commands(["where", "coords"]);
+    let c = Commands {
+        dispatcher: &modded,
+        registries: &registries,
+    };
+    let mut screen = ChatScreen::new(&m, &c, "", 0, 640, 360, full());
+    // As the second screen's chat opens it: the completions are buttons, not the list.
+    screen.auto_suggestions = false;
+    screen.type_text(&m, &c, "/co");
+    // Offered with the list closed, the word at the cursor first (sortSuggestions).
+    assert!(!screen.suggestions_visible());
+    let offered = screen.completions();
+    assert_eq!(offered.first().map(String::as_str), Some("coords"));
+    assert!(!screen.complete(&m, &c, offered.len()));
+    assert_eq!(screen.value(), "/co");
+    assert!(screen.complete(&m, &c, 0));
+    assert_eq!(screen.value(), "/coords");
+    assert!(!screen.suggestions_visible());
+}
+
+#[test]
 fn chat_completes_the_servers_custom_completions_with_the_players() {
     // CommandSuggestions.updateCommandInfo completes chat from
     // ClientSuggestionProvider.getCustomTabSuggestions: the online players

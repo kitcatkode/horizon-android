@@ -35,6 +35,13 @@ pub mod fonts {
     pub const BRICOLAGE_BOLD: &[u8] = include_bytes!("../fonts/BricolageGrotesque-Bold.ttf");
     pub const BRICOLAGE_DISPLAY_BOLD: &[u8] =
         include_bytes!("../fonts/BricolageGrotesqueDisplay-Bold.ttf");
+    /// Material Symbols Rounded (Apache-2.0, `fonts/LICENSE-MaterialSymbols.txt`): the Material 3
+    /// interface's icons, outlined and filled, cut to the ones used by
+    /// `tools/material_symbols_subset.py`.
+    pub const MATERIAL_SYMBOLS: &[u8] =
+        include_bytes!("../fonts/MaterialSymbolsRounded-outlined.ttf");
+    pub const MATERIAL_SYMBOLS_FILLED: &[u8] =
+        include_bytes!("../fonts/MaterialSymbolsRounded-filled.ttf");
 }
 
 /// The launcher's pixel icons: Pixelarticons (MIT, `icons/pixel/LICENSE-pixelarticons.txt`), 24

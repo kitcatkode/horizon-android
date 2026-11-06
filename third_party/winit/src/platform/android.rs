@@ -244,6 +244,13 @@ pub fn set_native_gamepads(ids: &[i32]) {
     crate::platform_impl::set_gamepad_devices(ids);
 }
 
+/// Controllers with a B button of their own (the AYN Thor's built-in pad): their Back key stays
+/// Android's Back instead of becoming the B button.
+#[cfg(android_platform)]
+pub fn set_native_system_back(ids: &[i32]) {
+    crate::platform_impl::set_system_back_devices(ids);
+}
+
 /// True only for device IDs observed emitting mouse/touchpad source events.
 #[cfg(android_platform)]
 pub fn native_pointer_device(id: crate::event::DeviceId) -> bool {

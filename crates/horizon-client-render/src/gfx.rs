@@ -155,6 +155,7 @@ mod flat;
 #[cfg(target_os = "android")]
 mod frame_scale;
 mod frame_timing;
+pub mod panel;
 
 mod frame_gen;
 mod hdr;

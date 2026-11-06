@@ -1429,14 +1429,7 @@ impl ChatScreen {
         } else {
             72
         };
-        // sortSuggestions: those starting with the word at the cursor first.
-        let partial = &value[..byte_at(&value, self.input.cursor)];
-        let word = partial[last_word_index(partial)..].to_lowercase();
-        let (mut first, rest): (Vec<Suggestion>, Vec<Suggestion>) =
-            list.into_iter().partition(|s| {
-                s.text.starts_with(&word) || s.text.starts_with(&format!("minecraft:{word}"))
-            });
-        first.extend(rest);
+        let first = self.sort_suggestions(list);
         // SuggestionsList: beside a bordered box, or over an unbordered one.
         let n = first.len().min(self.layout.line_limit) as i32;
         let bordered = i32::from(self.input.bordered);
@@ -1457,6 +1450,49 @@ impl ChatScreen {
         };
         self.select(&mut l, 0);
         self.suggestions = Some(l);
+    }
+    /// `CommandSuggestions.sortSuggestions`: those starting with the word at the cursor first.
+    fn sort_suggestions(&self, list: Vec<Suggestion>) -> Vec<Suggestion> {
+        let value = &self.input.value;
+        let partial = &value[..byte_at(value, self.input.cursor)];
+        let word = partial[last_word_index(partial)..].to_lowercase();
+        let (mut first, rest): (Vec<Suggestion>, Vec<Suggestion>) =
+            list.into_iter().partition(|s| {
+                s.text.starts_with(&word) || s.text.starts_with(&format!("minecraft:{word}"))
+            });
+        first.extend(rest);
+        first
+    }
+    /// The completions at the cursor in the suggestion list's order, shown or not: what a
+    /// touch screen offers to tap.
+    pub fn completions(&self) -> Vec<String> {
+        if let Some(l) = &self.suggestions {
+            return l.list.iter().map(|s| s.text.clone()).collect();
+        }
+        let Some((_, list)) = &self.pending else {
+            return Vec::new();
+        };
+        self.sort_suggestions(list.clone())
+            .into_iter()
+            .map(|s| s.text)
+            .collect()
+    }
+    /// Fill in completion `index` of [`Self::completions`], as clicking it in the list does,
+    /// and leave the list hidden. False when there is no such completion.
+    pub fn complete(&mut self, m: &Measure, c: &Commands, index: usize) -> bool {
+        if self.suggestions.is_none() {
+            self.show_suggestions(m, true);
+        }
+        let Some(mut l) = self.suggestions.take() else {
+            return false;
+        };
+        if index >= l.list.len() {
+            return false;
+        }
+        self.select(&mut l, index as isize);
+        self.use_suggestion(m, c, &mut l);
+        self.suggestions = None;
+        true
     }
     /// `SuggestionsList.select`: the grey completion after the text.
     fn select(&mut self, l: &mut SuggestionList, index: isize) {

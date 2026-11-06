@@ -80,7 +80,7 @@ impl NoResources {
 
     pub fn draw(&self, ui: &mut Ui) {
         let layout = self.layout(ui);
-        ui.rounded(0.0, 0.0, ui.w, ui.h, 0.0, color::BG);
+        ui.rounded(0.0, 0.0, ui.w, ui.h, 0.0, color::bg());
         let mut y = layout.y;
         ui.text_line(
             Face::Medium,
@@ -88,40 +88,28 @@ impl NoResources {
             TITLE_LINE,
             layout.x,
             y,
-            color::TEXT,
+            color::text(),
             TITLE,
         );
         y += TITLE_LINE + 16.0;
         for paragraph in &layout.lines {
             for line in paragraph {
-                ui.text_line(Face::Regular, BODY, LINE, layout.x, y, color::TEXT, line);
+                ui.text_line(Face::Regular, BODY, LINE, layout.x, y, color::text(), line);
                 y += LINE;
             }
             y += PARAGRAPH_GAP;
         }
         for button in &layout.buttons {
-            let hovered = button.contains(ui.cursor);
-            let (plate, ink) = match (button.action, hovered) {
-                (Action::Download, false) => (color::ACCENT, color::ON_ACCENT),
-                (Action::Download, true) => {
-                    (color::with_alpha(color::ACCENT, 0.85), color::ON_ACCENT)
-                }
-                (Action::Quit, false) => (color::RAISED, color::TEXT),
-                (Action::Quit, true) => (color::HOVER, color::TEXT),
+            let kind = match button.action {
+                Action::Download => crate::ui_material::Button::Filled,
+                Action::Quit => crate::ui_material::Button::Tonal,
             };
-            let h = CONTROL;
-            ui.rounded(button.x, button.y, button.w, h, h / 2.0, plate);
-            let lw = ui.measure(Face::Medium, BUTTON_TEXT, button.label);
-            let lx = button.x + ((button.w - lw) / 2.0).round();
-            ui.text_line(
-                Face::Medium,
-                BUTTON_TEXT,
-                h,
-                lx,
-                button.y,
-                ink,
-                button.label,
-            );
+            let state = crate::ui_material::State {
+                hovered: button.contains(ui.cursor),
+                ..Default::default()
+            };
+            let rect = [button.x, button.y, button.w, CONTROL];
+            ui.m3_button(rect, kind, None, button.label, state);
         }
         let small_y = layout.buttons[0].y + CONTROL + 20.0;
         for (i, line) in wrap(
@@ -141,7 +129,7 @@ impl NoResources {
                 SMALL_LINE,
                 layout.x,
                 line_y,
-                color::MUTED,
+                color::muted(),
                 line,
             );
         }
