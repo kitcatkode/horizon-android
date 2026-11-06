@@ -1949,6 +1949,21 @@ impl PackResources {
             light,
         ))
     }
+    /// The workers' context over `biomes`: this pack's own when `biomes` is
+    /// the table it was built with, else the same parts with that table.
+    fn context_with(&self, biomes: Arc<Biomes>) -> Arc<WorkerContext> {
+        let old = &self.context;
+        if Arc::ptr_eq(&old.biomes, &biomes) {
+            return old.clone();
+        }
+        Arc::new(WorkerContext {
+            assets: old.assets.clone(),
+            render: old.render.clone(),
+            tables: old.tables.clone(),
+            biomes,
+            light: old.light.clone(),
+        })
+    }
     /// The pack tables over their parts, which `load_resources` builds on
     /// separate workers.
     fn assemble(
@@ -15776,10 +15791,7 @@ impl Game<'_> {
             None => Some(self.streaming.lod_source()),
         };
         if let Some(source) = source {
-            self.lod = Some(horizon_client::lod::Lod::new(
-                source,
-                self.pack.context.clone(),
-            ));
+            self.lod = Some(horizon_client::lod::Lod::new(source, self.worker_context()));
             self.lod_observe.extend(self.world.chunks.keys().copied());
         }
     }
@@ -18772,6 +18784,11 @@ impl Game<'_> {
             &self.level.enabled_features,
         );
         (!Arc::ptr_eq(&table, self.res.biomes())).then_some(table)
+    }
+    /// What the chunk and far-terrain workers mesh with: the pack's tables
+    /// over the world's biomes.
+    fn worker_context(&self) -> Arc<WorkerContext> {
+        self.pack.context_with(world_biomes!(self).clone())
     }
     fn pack_files(&self) -> horizon_world::loot::PackOverlay<'_> {
         pack_files(&self.world_tables)

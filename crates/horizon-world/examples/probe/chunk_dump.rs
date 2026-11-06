@@ -138,6 +138,10 @@ fn datapacks(dir: &Path) -> Result<WorldgenOverrides, Error> {
         let mut files = Vec::new();
         walk(&pack, &pack.join("data"), &mut files);
         for file in files {
+            if let Some(template) = horizon_world::worldgen::overrides::template_id(&file) {
+                overrides.add_template(&template, fs::read(pack.join(&file))?);
+                continue;
+            }
             let read = || fs::read_to_string(pack.join(&file)).ok();
             if let PackFile::Unreadable = overrides.add_file(&id, &file, read) {
                 return Err(format!("{id}: {file}: unreadable").into());

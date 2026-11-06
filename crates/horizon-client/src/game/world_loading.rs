@@ -686,7 +686,7 @@ pub(super) fn make_streaming(
                 registry: pack.assets.clone(),
                 biomes: biomes.clone(),
             }),
-            pack.context.clone(),
+            pack.context_with(biomes.clone()),
             res.threads(),
         )
     } else if let Some(inner) = flat_vanilla {
@@ -709,7 +709,7 @@ pub(super) fn make_streaming(
                 registry: pack.assets.clone(),
                 biomes: biomes.clone(),
             }),
-            pack.context.clone(),
+            pack.context_with(biomes.clone()),
             res.threads(),
         )
     } else if let Some(inner) = flat {
@@ -720,7 +720,7 @@ pub(super) fn make_streaming(
                 registry: pack.assets.clone(),
                 biomes: biomes.clone(),
             }),
-            pack.context.clone(),
+            pack.context_with(biomes.clone()),
             res.threads(),
         )
     } else if options.test_terrain && dim == Dim::Overworld {
@@ -732,7 +732,7 @@ pub(super) fn make_streaming(
                 registry: pack.assets.clone(),
                 biomes: biomes.clone(),
             }),
-            pack.context.clone(),
+            pack.context_with(biomes.clone()),
             res.threads(),
         )
     } else {
@@ -779,7 +779,7 @@ pub(super) fn make_streaming(
                 registry: pack.assets.clone(),
                 biomes: biomes.clone(),
             }),
-            pack.context.clone(),
+            pack.context_with(biomes.clone()),
             res.threads(),
         )
     };

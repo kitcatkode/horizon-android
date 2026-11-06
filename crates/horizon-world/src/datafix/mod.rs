@@ -343,6 +343,14 @@ pub fn update_hotbar(tag: &mut Tag) {
     update(Ty::Hotbar, tag, version, CURRENT);
 }
 
+/// `StructureTemplateManager.readStructure`: a structure template file (its
+/// DataVersion 500 when missing) brought to the current version. Data packs
+/// ship templates saved by older versions; the prepared ones are current.
+pub fn update_structure(tag: &mut Tag) {
+    let version = dynamic::as_int(tag.get("DataVersion"), 500);
+    update(Ty::Structure, tag, version, CURRENT);
+}
+
 /// The saved data type of a file below a `data` folder (`namespace/path.dat`).
 pub fn saved_data_type(relative: &str) -> Option<Ty> {
     let name = relative.strip_suffix(".dat").unwrap_or(relative);
