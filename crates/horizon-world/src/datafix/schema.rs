@@ -50,6 +50,8 @@ pub enum Ty {
     SavedScoreboard,
     SavedWorldGenSettings,
     SavedStructureFeatureIndices,
+    /// `STRUCTURE`: a structure template file.
+    Structure,
     /// Saved data that has no typed fields (`DSL.remainder`).
     SavedRemainder,
     /// Each saved data kind still needs its own identity for fixes that target it.
@@ -246,6 +248,13 @@ impl Walker<'_> {
                     self.field(Ty::ItemStack, v, "item");
                     self.field(Ty::BlockState, v, "block_state");
                 }
+            }
+            // V1460: each entity's `nbt` is an entity tree, each block's `nbt` a
+            // block entity, and the palette is block states.
+            Ty::Structure => {
+                self.list_of_field(Ty::EntityTree, v, "entities", "nbt");
+                self.list_of_field(Ty::BlockEntity, v, "blocks", "nbt");
+                self.list(Ty::BlockState, v, "palette");
             }
             Ty::Hotbar => {
                 if let Tag::Compound(c) = v {

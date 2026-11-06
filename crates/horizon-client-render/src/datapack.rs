@@ -850,6 +850,8 @@ pub fn dimension_stems(packs: &[&DataPack]) -> BTreeMap<String, serde_json::Valu
 /// left out: the prepared bundles are it) for the chunk generator, and what
 /// it leaves out, for the log. `biomes` says which biomes the game has: a
 /// pack's new biome is left out (the game has no colours, sounds or id for it).
+/// The packs' structure templates come with them, for jigsaw and template
+/// structures.
 pub fn worldgen_overrides(
     packs: &[&DataPack],
     biomes: impl Fn(&str) -> bool,
@@ -859,6 +861,13 @@ pub fn worldgen_overrides(
     let mut warnings = Vec::new();
     for pack in packs {
         for file in pack.list_kinds(&overrides::PACK_KINDS) {
+            if let Some(template) = overrides::template_id(&file) {
+                match pack.read(&file) {
+                    Some(bytes) => out.add_template(&template, bytes),
+                    None => warnings.push(format!("{}: {file}: unreadable", pack.id)),
+                }
+                continue;
+            }
             let read = || String::from_utf8(pack.read(&file)?).ok();
             match out.add_file(&pack.id, &file, read) {
                 PackFile::Read | PackFile::Other => {}

@@ -218,6 +218,14 @@ meal still place vanilla's features.
 function, the overworld noise settings (sea level 70, no aquifers, a new final density with a new noise added), a placed feature and a
 biome tag. Every site must match vanilla with the pack and differ from Horizon without it.
 
+A pack's structure templates (`data/<ns>/structure/<path>.nbt`) join the same way: `worldgen_overrides` reads them into the
+overrides (`template_id`, `add_template`, the highest pack's file for an id winning) and `StructureResources::with_pack_templates`
+looks them up before the prepared `worldgen/structure/` folder, as `StructureTemplateManager` lists the packs' resources before the
+built-in ones. Without them a pack's jigsaw and template structures placed empty templates. Like vanilla's `readStructure`, every
+template is brought to the current version first (`datafix::update_structure`, the `STRUCTURE` type: palette block states, block
+entities and entities), since packs ship templates saved by older versions (`chain` and `grass` read as air without it);
+`tests/pack_templates.rs` covers both.
+
 Packs must be written for 26.3: its worldgen formats differ from 26.2's (density functions take `left`/`right`, `gradient` replaces
 `y_clamped_gradient`, noises take `base_octave`/`octave_count`, block states are strings, surface rules became the `material_rule` and
 `material_condition` registries, configured features lost `config`). Vanilla 26.3 refuses a 26.2 worldgen pack as Horizon does.

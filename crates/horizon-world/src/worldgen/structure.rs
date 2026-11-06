@@ -284,6 +284,8 @@ pub struct StructureResources {
     pub registry: &'static BlockRegistry,
     pub transforms: StateTransforms,
     dir: PathBuf,
+    /// The data packs' template files by id, read before `dir`'s.
+    pack_templates: HashMap<String, Arc<[u8]>>,
     templates: RwLock<HashMap<String, Option<Arc<StructureTemplate>>>>,
     pub processor_lists: BTreeMap<String, String>,
     jigsaw_states: BTreeMap<BlockStateId, bool>,
@@ -345,6 +347,7 @@ impl StructureResources {
             registry,
             transforms,
             dir: dir.to_owned(),
+            pack_templates: HashMap::new(),
             templates: RwLock::new(HashMap::new()),
             processor_lists,
             jigsaw_states,
@@ -355,6 +358,20 @@ impl StructureResources {
                 .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
                 .collect(),
         }
+    }
+    /// The data packs' structure templates (id → gzip NBT), which
+    /// `template` reads before the prepared folder's, as
+    /// `StructureTemplateManager` lists the packs' resources before the
+    /// built-in ones.
+    pub fn with_pack_templates<'a>(
+        mut self,
+        templates: impl IntoIterator<Item = (&'a str, &'a Arc<[u8]>)>,
+    ) -> Self {
+        self.pack_templates = templates
+            .into_iter()
+            .map(|(id, bytes)| (id.to_owned(), bytes.clone()))
+            .collect();
+        self
     }
     /// StructureTemplateManager.getOrCreate; missing templates are empty.
     pub fn template(&self, id: &str) -> Option<Arc<StructureTemplate>> {
@@ -367,13 +384,22 @@ impl StructureResources {
             return found.clone();
         }
         let (namespace, path) = id.split_once(':').unwrap();
-        let file = self.dir.join(namespace).join(format!("{path}.nbt"));
-        let loaded = std::fs::read(&file).ok().and_then(|bytes| {
+        let bytes: Option<std::borrow::Cow<'_, [u8]>> = match self.pack_templates.get(&id) {
+            Some(bytes) => Some(std::borrow::Cow::Borrowed(bytes)),
+            None => {
+                let file = self.dir.join(namespace).join(format!("{path}.nbt"));
+                std::fs::read(&file).ok().map(std::borrow::Cow::Owned)
+            }
+        };
+        let loaded = bytes.and_then(|bytes| {
             let mut raw = Vec::new();
-            flate2::read::GzDecoder::new(bytes.as_slice())
+            flate2::read::GzDecoder::new(&bytes[..])
                 .read_to_end(&mut raw)
                 .ok()?;
-            let tag = nbt::read_named(&raw, Limits::templates()).ok()?.0.tag;
+            let mut tag = nbt::read_named(&raw, Limits::templates()).ok()?.0.tag;
+            // A pack's template saved by an older version: its renamed
+            // blocks and old block entity and entity data upgraded first.
+            crate::datafix::update_structure(&mut tag);
             Some(StructureTemplate::from_nbt(
                 &tag,
                 self.registry,

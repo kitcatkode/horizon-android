@@ -6,8 +6,13 @@
 //! file for a tag adds its entries, and `replace` drops what came before.
 //! The prepared bundles are the built-in pack, so the packs above it are
 //! entries that replace or join a bundle's (`GeneratorData::load_with`).
+//! Structure templates (`data/<ns>/structure/<path>.nbt`) are read the same
+//! way: the highest pack's file for a template id is the one jigsaw and
+//! template structures place, over the prepared `worldgen/structure/`.
 use serde_json::Value;
 use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 /// The bundle of `dimension/<id>.json` level stems. Nothing prepared has
 /// it: a pack's level stem stands in for the world preset's.
@@ -43,8 +48,46 @@ const TAG_KINDS: [(&str, &str); 3] = [
     ("tags/fluid", "fluid_tags"),
     ("tags/worldgen/biome", "biome_tags"),
 ];
-/// The pack folders `add_file` looks at, in walk order.
-pub const PACK_KINDS: [&str; 4] = ["dimension", "dimension_type", "tags", "worldgen"];
+/// The pack folders `add_file` and `template_id` look at, in walk order.
+pub const PACK_KINDS: [&str; 5] = [
+    "dimension",
+    "dimension_type",
+    "structure",
+    "tags",
+    "worldgen",
+];
+
+/// `ns:path` for a pack's structure template `data/<ns>/structure/<path>.nbt`
+/// (`StructureTemplateManager`'s pack lister), else `None`.
+pub fn template_id(file: &str) -> Option<String> {
+    let (ns, rest) = file.strip_prefix("data/")?.split_once('/')?;
+    let path = rest.strip_prefix("structure/")?.strip_suffix(".nbt")?;
+    (!ns.is_empty() && !path.is_empty()).then(|| format!("{ns}:{path}"))
+}
+
+/// A pack's structure template file, gzip NBT as the pack holds it.
+///
+/// Equal when the bytes are; the hash reads only the length and the first
+/// bytes, so a pack set's key stays cheap with hundreds of templates.
+#[derive(Clone)]
+pub struct TemplateBytes(pub Arc<[u8]>);
+impl PartialEq for TemplateBytes {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0) || self.0 == other.0
+    }
+}
+impl Eq for TemplateBytes {}
+impl Hash for TemplateBytes {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.len().hash(state);
+        self.0[..self.0.len().min(64)].hash(state);
+    }
+}
+impl std::fmt::Debug for TemplateBytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TemplateBytes({} bytes)", self.0.len())
+    }
+}
 
 /// `ns:path` for a pack file `data/<ns>/<kind>/<path>.json`.
 fn resource_id(file: &str, kind: &str) -> Option<String> {
@@ -136,10 +179,22 @@ pub struct WorldgenOverrides {
     entries: BTreeMap<String, BTreeMap<String, String>>,
     /// Tag bundle name → (tag id, pack id, tag file text), lowest pack first.
     tags: BTreeMap<String, Vec<(String, String, String)>>,
+    /// Template id → the highest pack's structure template.
+    templates: BTreeMap<String, TemplateBytes>,
 }
 impl WorldgenOverrides {
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty() && self.tags.is_empty()
+        self.entries.is_empty() && self.tags.is_empty() && self.templates.is_empty()
+    }
+    /// A pack's structure template `id` (`template_id`): called for packs
+    /// from the lowest to the highest, so the last call for an id wins.
+    pub fn add_template(&mut self, id: &str, bytes: Vec<u8>) {
+        self.templates
+            .insert(id.to_owned(), TemplateBytes(bytes.into()));
+    }
+    /// The packs' structure templates, by id.
+    pub fn templates(&self) -> impl Iterator<Item = (&str, &Arc<[u8]>)> {
+        self.templates.iter().map(|(id, t)| (id.as_str(), &t.0))
     }
     /// A pack's file for `id` in `bundle`: called for packs from the lowest
     /// to the highest, so the last call for an id wins.
