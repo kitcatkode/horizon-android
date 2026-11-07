@@ -592,7 +592,7 @@ impl Loading {
                 }
                 Event::OpenDataPackFolder(dir) => {
                     let _ = std::fs::create_dir_all(&dir);
-                    packs::open_folder(&dir);
+                    packs::open_data_pack_folder(&dir);
                 }
                 Event::OpenModFolder => {
                     let dir = Game::options_path().with_file_name(horizon_client::mod_list::DIR);
@@ -750,7 +750,6 @@ impl Loading {
 
     #[cfg(target_os = "android")]
     pub(super) fn menu_android_keyboard(&mut self) {
-        use horizon_client::osk::Output;
         if let Some(notice) = crate::documents::poll() {
             if notice.changed {
                 self.menu.options.pack_infos =
@@ -762,38 +761,68 @@ impl Loading {
             log::info!("{}", notice.text);
         }
         for out in crate::platform::poll() {
-            match out {
-                Output::Text(s) => {
-                    if self.menu.options_open {
-                        self.menu
-                            .options
-                            .type_text(&self.gui.as_ref().unwrap().atlas, &s);
-                    } else if let Some(t) = &mut self.menu.title {
-                        t.type_text(&s);
-                    }
-                }
-                Output::Backspace => {
-                    if self.menu.options_open {
-                        let e = self.menu.options.key(
-                            &mut self.settings,
-                            &self.gui.as_ref().unwrap().atlas,
-                            KeyCode::Backspace,
-                            None,
-                        );
-                        self.menu_option_events(e);
-                    } else if let Some(t) = &mut self.menu.title {
-                        t.backspace();
-                    }
-                }
-                Output::Enter | Output::Close => {
-                    crate::platform::hide();
-                    if let Some(t) = &mut self.menu.title {
-                        t.confirm_edit();
-                    }
+            self.menu_osk_output(out);
+        }
+    }
+    /// The bottom screen of the AYN Thor: a keyboard there while a title screen's text field
+    /// takes typing (Create World's name and seed, a server's address).
+    #[cfg(target_os = "android")]
+    pub(super) fn menu_second_screen(&mut self) {
+        let Some(gui) = self.gui.as_ref() else {
+            return;
+        };
+        let options_open = self.menu.options_open;
+        let field = self.menu.title.as_mut().and_then(|t| {
+            (!options_open && t.has_caret_field()).then(|| {
+                t.focused_field()
+                    .map(|(_, s, _)| s.clone())
+                    .unwrap_or_default()
+            })
+        });
+        let typed = super::second_screen::startup_panel(
+            self.renderer.as_ref(),
+            &gui.atlas,
+            field.as_deref(),
+        );
+        for out in typed {
+            self.menu_osk_output(out);
+        }
+    }
+    /// A key of the system keyboard or the bottom screen's, into the focused field.
+    #[cfg(target_os = "android")]
+    fn menu_osk_output(&mut self, out: horizon_client::osk::Output) {
+        use horizon_client::osk::Output;
+        match out {
+            Output::Text(s) => {
+                if self.menu.options_open {
+                    self.menu
+                        .options
+                        .type_text(&self.gui.as_ref().unwrap().atlas, &s);
+                } else if let Some(t) = &mut self.menu.title {
+                    t.type_text(&s);
                 }
             }
-            self.save_menu_address();
+            Output::Backspace => {
+                if self.menu.options_open {
+                    let e = self.menu.options.key(
+                        &mut self.settings,
+                        &self.gui.as_ref().unwrap().atlas,
+                        KeyCode::Backspace,
+                        None,
+                    );
+                    self.menu_option_events(e);
+                } else if let Some(t) = &mut self.menu.title {
+                    t.backspace();
+                }
+            }
+            Output::Enter | Output::Close => {
+                crate::platform::hide();
+                if let Some(t) = &mut self.menu.title {
+                    t.confirm_edit();
+                }
+            }
         }
+        self.save_menu_address();
     }
     #[cfg(target_os = "android")]
     fn startup_navigation(&mut self, events: &dyn EventLoopCtl, event: &KeyEvent) -> Result<bool> {

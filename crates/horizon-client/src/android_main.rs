@@ -228,6 +228,10 @@ fn android_main(app: AndroidApp) {
         return;
     };
     horizon_client::android_runtime::configure_cache_dir(cache.clone());
+    // `std::env::temp_dir` is `/data/local/tmp` without TMPDIR, which an app cannot write: Create
+    // World's data pack folder and the other temporary folders go to the app's cache instead.
+    // SAFETY: set at startup, before the game's threads start reading the environment.
+    unsafe { std::env::set_var("TMPDIR", &cache) };
     horizon_client::official_install::configure_download_cache_dir(cache);
     horizon_client::android_runtime::install_clipboard(
         horizon_client::android_runtime::ClipboardHooks {

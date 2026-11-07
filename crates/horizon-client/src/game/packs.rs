@@ -30,6 +30,16 @@ pub fn packs_dir() -> PathBuf {
         .unwrap_or_default()
         .join("resourcepacks")
 }
+/// The Data Packs screen's Open Pack Folder (a world's `datapacks`, or Create World's folder).
+/// Android shows no app folder: the document picker adds a pack to it instead.
+pub fn open_data_pack_folder(dir: &Path) {
+    #[cfg(target_os = "android")]
+    if let Err(error) = crate::documents::begin_data_pack(dir.to_owned()) {
+        log::warn!("Horizon: {error}");
+    }
+    #[cfg(not(target_os = "android"))]
+    open_folder(dir);
+}
 /// `Util.getPlatform().openPath`: the system file manager on the folder.
 pub fn open_folder(dir: &Path) {
     #[cfg(target_os = "android")]

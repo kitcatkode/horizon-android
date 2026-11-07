@@ -24,7 +24,9 @@ pub(super) struct Drawn {
     pub(super) size: [u32; 2],
     /// The hotbar's own GUI scale.
     pub(super) hotbar_scale: u32,
-    /// The tabs' bottom edge (the hotbar is under it), in the panel's GUI pixels.
+    /// Where the content starts under the hotbar, in the panel's GUI pixels.
+    pub(super) top: f32,
+    /// The tabs' bottom edge, in the panel's GUI pixels.
     pub(super) bottom: f32,
     /// Where the hosted screen went, if one was drawn.
     pub(super) offset: Option<Offset>,
@@ -78,6 +80,7 @@ pub(super) fn screen_touch(
     if touch.phase == Phase::Started {
         let on_screen = drawn.offset.is_some()
             && game.screen_hosted()
+            && point[1] >= drawn.top
             && point[1] < drawn.bottom
             && !tabs::on_tabs(point);
         POINTER.set(on_screen);
@@ -189,17 +192,19 @@ impl Game<'_> {
         [left, y, right - left, self.screen_height()]
     }
 
-    /// The hosted screen's layout on a panel `size` pixels big with the hotbar from
-    /// `hotbar_top` (pixels) down: the largest scale (up to the panel's own) at which it fits
-    /// above the tabs.
-    pub(super) fn hosted_layout(&self, size: [u32; 2], hotbar_top: f32) -> Option<Layout> {
+    /// The hosted screen's layout on a panel `size` pixels big with the hotbar (at
+    /// `hotbar_scale`) along the top: the largest scale (up to the panel's own) at which it fits
+    /// between the hotbar and the tabs.
+    pub(super) fn hosted_layout(&self, size: [u32; 2], hotbar_scale: u32) -> Option<Layout> {
         let renderer = self.renderer.as_ref()?;
         let main = [renderer.config.width, renderer.config.height];
         let bounds = self.hosted_bounds(&HudBatch::new(main));
         let mut scale = super::gui_scale(size);
         while scale > 1 {
             let width = size[0] as f32 / scale as f32;
-            let room = super::tabs_bottom(hotbar_top, scale) - tabs::TABS_HEIGHT - super::TOP;
+            let room = super::tabs_bottom(size, scale)
+                - tabs::TABS_HEIGHT
+                - super::content_top(hotbar_scale, scale);
             if bounds[2] + 4.0 <= width && bounds[3] <= room {
                 break;
             }

@@ -23,6 +23,8 @@ struct Request {
     appearance: Option<crate::skins::library::Kind>,
     home: PathBuf,
     cache: PathBuf,
+    /// A data pack folder (a world's, or Create World's) the pack goes into instead of `kind`'s.
+    into: Option<PathBuf>,
 }
 struct Conflict {
     kind: Kind,
@@ -120,12 +122,38 @@ pub fn begin(kind: Kind, home: PathBuf) -> std::result::Result<(), String> {
         appearance: None,
         home,
         cache,
+        into: None,
     });
     if !crate::native_ime::pick_document() {
         picker_failed("Android document picker is unavailable");
         return Err("Android document picker is unavailable".into());
     }
     notice(format!("Choose a {} file", kind.label()), false);
+    Ok(())
+}
+/// The data pack screen's Open Pack Folder: Android has no folder to show, so the pack chosen
+/// with the document picker is copied into `dir`, where the screen's watcher lists it.
+pub fn begin_data_pack(dir: PathBuf) -> std::result::Result<(), String> {
+    if busy() {
+        return Err("Finish or cancel the current import first".into());
+    }
+    CANCEL.store(false, Ordering::Relaxed);
+    crate::platform::hide();
+    let cache = crate::platform::cache_dir()
+        .ok_or("Could not access the Android import cache")?
+        .join("content-imports");
+    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
+        kind: Kind::Packs,
+        appearance: None,
+        home: crate::backend::data_dir(),
+        cache,
+        into: Some(dir),
+    });
+    if !crate::native_ime::pick_document() {
+        picker_failed("Android document picker is unavailable");
+        return Err("Android document picker is unavailable".into());
+    }
+    notice("Choose a data pack ZIP", false);
     Ok(())
 }
 pub fn picker_failed(error: &str) {
@@ -149,6 +177,7 @@ pub fn begin_appearance(
         appearance: Some(kind),
         home,
         cache,
+        into: None,
     });
     if !crate::native_ime::pick_document() {
         picker_failed("Android document picker is unavailable");
@@ -251,7 +280,10 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
     if !content_files::plain_name(&name) || !request.kind.accepts(&name) {
         return Err("Selected file has the wrong extension for this folder".into());
     }
-    let dir = request.home.join(request.kind.folder());
+    let dir = request
+        .into
+        .clone()
+        .unwrap_or_else(|| request.home.join(request.kind.folder()));
     std::fs::create_dir_all(&dir)?;
     if std::fs::symlink_metadata(&dir)?.file_type().is_symlink() {
         return Err("Refusing a redirected content directory".into());
@@ -307,6 +339,10 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
             return Err("Import cancelled".into());
         }
         let target = dir.join(name);
+        // A data pack chosen again replaces its copy: nothing in a game asks Keep both or Replace.
+        if request.into.is_some() && std::fs::symlink_metadata(&target).is_ok_and(|m| m.is_file()) {
+            std::fs::remove_file(&target)?;
+        }
         if target.exists() {
             STATE.lock().unwrap_or_else(|e| e.into_inner()).conflict = Some(Conflict {
                 kind: request.kind,
@@ -315,6 +351,16 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
             });
             notice(
                 "File already exists: choose Keep both, Replace or Cancel",
+                false,
+            );
+        } else if request.into.is_some() {
+            // Not `imported`: the menus reload resource packs on that, closing this screen.
+            std::fs::rename(&staged, &target)?;
+            notice(
+                format!(
+                    "Added data pack {}",
+                    target.file_name().unwrap_or_default().to_string_lossy()
+                ),
                 false,
             );
         } else {
@@ -497,7 +543,14 @@ pub fn draw_ui(ui: &mut Ui<'_>) {
         },
     );
     let name = ui.fit_text(Face::Regular, 16.0, &name, w - 24.0);
-    ui.text(Face::Regular, 16.0, x + 12.0, y + 46.0, color::muted(), &name);
+    ui.text(
+        Face::Regular,
+        16.0,
+        x + 12.0,
+        y + 46.0,
+        color::muted(),
+        &name,
+    );
     let width = (w - 24.0) / choices.len() as f32;
     for (i, (label, choice)) in choices.into_iter().enumerate() {
         let rect = if vertical {

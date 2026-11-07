@@ -373,7 +373,7 @@ impl Game<'_> {
                 }
                 Event::OpenDataPackFolder(dir) => {
                     let _ = std::fs::create_dir_all(&dir);
-                    super::packs::open_folder(&dir);
+                    super::packs::open_data_pack_folder(&dir);
                 }
                 Event::OpenModFolder => {
                     let dir = Self::options_path().with_file_name(horizon_client::mod_list::DIR);
