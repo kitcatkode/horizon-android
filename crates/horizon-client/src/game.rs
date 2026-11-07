@@ -20279,6 +20279,8 @@ impl Loading {
                 renderer.gpu_times.clear();
             }
         }
+        #[cfg(target_os = "android")]
+        self.menu_second_screen();
         if !self.shown {
             self.shown = true;
             log::info!(

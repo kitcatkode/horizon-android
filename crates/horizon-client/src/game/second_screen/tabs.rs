@@ -130,7 +130,7 @@ struct Layout {
     tabs_y: f32,
 }
 impl Layout {
-    /// The panel from `top`, the tabs under it ending at `bottom` (the hotbar is below).
+    /// The panel from `top` (under the hotbar), the tabs under it ending at `bottom`.
     fn new(width: f32, top: f32, bottom: f32) -> Self {
         let tabs_y = bottom - TAB[1];
         let panel_bottom = (tabs_y + 4.0).max(top + 40.0);
